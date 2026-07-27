@@ -1,28 +1,31 @@
 /**
  * GameCanvas —— React 侧的画布外壳。
  *
- * T-08 起用 [Tank](../game/types.ts#L57-L70) 实体 + [MovementSystem](../game/systems/MovementSystem.ts)
- * 取代 T-06/T-07 的演示方块：
+ * T-09 起接入真正的 Bullet + CollisionSystem，取代 T-08 的临时粒子：
  *   Layer1 底 + 静态地形（brick/steel/water/ice/base）
- * → Layer2 坦克（真正的 Tank，走网格 AABB 碰撞，撞墙即停/滑边）
- * → Layer3 grass（在坦克之上，实现红白机原版「草丛遮蔽」）。
+ * → Layer2 坦克 + 子弹 + 爆炸（真实碰撞，砖块可破、钢块需 power=2 才破）
+ * → Layer3 grass（在坦克之上，实现红白机原版「草丛遮蔽」）
  *
- * 空格开火目前只发白色像素粒子作为视觉反馈——真正的 Bullet 实体 + 破砖判定
- * 在 T-09 接入。
- *
- * 输入：↑↓←→ / WASD 移动，Space 视觉粒子，Esc 切 pause/resume。
+ * 事件：base 被击中会通过 onBaseHit 冒泡到 PlayPage，供后续 T-12 game-over 场景使用。
+ * 输入：↑↓←→ / WASD 移动，Space 开火（PLAYER_MAX_BULLETS 上限），Esc 切 pause/resume。
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CANVAS_HEIGHT, CANVAS_WIDTH, PALETTE, TILE_SIZE } from '@/game/constants'
+import { CANVAS_HEIGHT, CANVAS_WIDTH, PLAYER_MAX_BULLETS, TANK_COOLDOWN } from '@/game/constants'
+import { canTankFire, createBullet } from '@/game/entities/Bullet'
 import { createPlayerTank } from '@/game/entities/Tank'
 import { DEFAULT_LEVEL } from '@/game/maps/levels'
-import { DIRECTION_VECTORS, updateTank } from '@/game/systems/MovementSystem'
+import {
+  countAliveBulletsByOwner,
+  pruneDeadBullets,
+  stepBullets,
+} from '@/game/systems/CollisionSystem'
+import { updateTank } from '@/game/systems/MovementSystem'
 import { RenderSystem } from '@/game/systems/RenderSystem'
 import { useGameLoop } from '@/hooks/useGameLoop'
 import { useKeyboard } from '@/hooks/useKeyboard'
 import type { EngineStats } from '@/game/GameEngine'
-import type { InputIntent, LevelDefinition, Tank } from '@/game/types'
+import type { Bullet, EntityId, Explosion, InputIntent, LevelDefinition, Tank } from '@/game/types'
 
 interface GameCanvasProps {
   onStats?: (stats: EngineStats) => void
@@ -30,6 +33,10 @@ interface GameCanvasProps {
   onPauseChange?: (paused: boolean) => void
   /** 观察玩家坦克数据（HUD 用），每帧最多推一次。 */
   onTankChange?: (tank: Tank) => void
+  /** 观察子弹阵列长度（HUD 用），供显示"存活 / MAX"。 */
+  onBulletsChange?: (aliveCount: number, max: number) => void
+  /** 基地被击中：调用方切 game-over 场景（T-12）。目前只做视觉提示。 */
+  onBaseHit?: () => void
   /** 关卡定义；默认使用 STAGE 01（T-07 内置首关）。 */
   level?: LevelDefinition
   /** 显示 tile 网格线（调试用）；默认 false。 */
@@ -37,48 +44,41 @@ interface GameCanvasProps {
   className?: string
 }
 
-interface Particle {
-  x: number
-  y: number
-  vx: number
-  vy: number
-  life: number
-}
+/** 爆炸单帧持续 0.1s，共 3 帧 = 0.3s。 */
+const EXPLOSION_TTL = 0.3
+const EXPLOSION_FRAME_DURATION = EXPLOSION_TTL / 3
 
-const PARTICLE_LIFE = 0.35
-const PARTICLE_SPEED = 220
-const PARTICLE_SIZE = 6
-
-function spawnParticle(tank: Tank, particles: Particle[]): void {
-  const v = DIRECTION_VECTORS[tank.dir]
-  const originX = tank.x + TILE_SIZE / 2 - PARTICLE_SIZE / 2 + v.x * (TILE_SIZE / 2)
-  const originY = tank.y + TILE_SIZE / 2 - PARTICLE_SIZE / 2 + v.y * (TILE_SIZE / 2)
-  particles.push({
-    x: originX,
-    y: originY,
-    vx: v.x * PARTICLE_SPEED,
-    vy: v.y * PARTICLE_SPEED,
-    life: PARTICLE_LIFE,
+/** 生成一次爆炸；`kind='tank'` 时半径更大。 */
+function spawnExplosion(
+  list: Explosion[],
+  nextId: () => EntityId,
+  x: number,
+  y: number,
+  kind: 'bullet' | 'tank',
+): void {
+  const size = kind === 'tank' ? 32 : 16
+  list.push({
+    id: nextId(),
+    dir: 'up',
+    alive: true,
+    x: x - size / 2,
+    y: y - size / 2,
+    w: size,
+    h: size,
+    ttl: EXPLOSION_TTL,
+    frame: 0,
   })
 }
 
-function stepParticles(particles: Particle[], dt: number): void {
-  for (let i = particles.length - 1; i >= 0; i--) {
-    const p = particles[i]
-    p.life -= dt
-    if (p.life <= 0) {
-      particles.splice(i, 1)
+function stepExplosions(list: Explosion[], dt: number): void {
+  for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i]
+    e.ttl -= dt
+    if (e.ttl <= 0) {
+      list.splice(i, 1)
       continue
     }
-    p.x += p.vx * dt
-    p.y += p.vy * dt
-  }
-}
-
-function drawParticles(ctx: CanvasRenderingContext2D, particles: Particle[]): void {
-  ctx.fillStyle = PALETTE.bullet
-  for (const p of particles) {
-    ctx.fillRect(Math.round(p.x), Math.round(p.y), PARTICLE_SIZE, PARTICLE_SIZE)
+    e.frame = Math.min(2, Math.floor((EXPLOSION_TTL - e.ttl) / EXPLOSION_FRAME_DURATION))
   }
 }
 
@@ -92,11 +92,15 @@ function drawPauseOverlay(ctx: CanvasRenderingContext2D): void {
   ctx.fillText('PAUSE', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2)
 }
 
+let localExplosionId = 1_000_000
+
 export default function GameCanvas({
   onStats,
   onInput,
   onPauseChange,
   onTankChange,
+  onBulletsChange,
+  onBaseHit,
   level = DEFAULT_LEVEL,
   showGrid = false,
   className,
@@ -104,16 +108,20 @@ export default function GameCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const input = useKeyboard()
   const renderSystem = useMemo(() => new RenderSystem({ showGrid }), [showGrid])
-  // 每次挂载建一辆玩家坦克；切关时会因 level 变化触发。
   const tankRef = useRef<Tank>(createPlayerTank())
-  const particlesRef = useRef<Particle[]>([])
+  const bulletsRef = useRef<Bullet[]>([])
+  const explosionsRef = useRef<Explosion[]>([])
+  // 关卡地图会被子弹击中砖块修改，因此需要深拷贝一份到 ref。
+  const mapRef = useRef<LevelDefinition['map']>(level.map.map((row) => [...row]))
   const [paused, setPaused] = useState(false)
   const lastIntentRef = useRef<InputIntent>({ dir: null, fire: false, pausePressed: false })
 
-  // 切关卡时重置玩家坦克到出生点，同时清空粒子。
+  // 切关卡时重置所有动态实体 + 深拷贝地图。
   useEffect(() => {
     tankRef.current = createPlayerTank()
-    particlesRef.current = []
+    bulletsRef.current = []
+    explosionsRef.current = []
+    mapRef.current = level.map.map((row) => [...row])
   }, [level])
 
   const { engine, stats } = useGameLoop(canvasRef, {
@@ -122,10 +130,35 @@ export default function GameCanvas({
       const fireEdge = input.consumeFireEdge()
 
       const tank = tankRef.current
-      updateTank(level.map, tank, dt, { intent })
+      const bullets = bulletsRef.current
+      const explosions = explosionsRef.current
+      const map = mapRef.current
 
-      if (fireEdge && tank.alive) spawnParticle(tank, particlesRef.current)
-      stepParticles(particlesRef.current, dt)
+      updateTank(map, tank, dt, { intent })
+
+      // 开火：受冷却 + PLAYER_MAX_BULLETS 双重限制。
+      if (fireEdge && canTankFire(tank)) {
+        const owned = countAliveBulletsByOwner(bullets, tank.id)
+        if (owned < PLAYER_MAX_BULLETS) {
+          bullets.push(createBullet(tank))
+          tank.cooldown = TANK_COOLDOWN.PLAYER
+        }
+      }
+
+      // 推进 & 命中判定（就地修改 bullets/tanks/map）。
+      stepBullets({
+        map,
+        bullets,
+        tanks: [tank],
+        dt,
+        events: {
+          onExplosion: (x, y, kind) =>
+            spawnExplosion(explosions, () => ++localExplosionId, x, y, kind),
+          onBaseHit: () => onBaseHit?.(),
+        },
+      })
+      pruneDeadBullets(bullets)
+      stepExplosions(explosions, dt)
 
       lastIntentRef.current = intent
     },
@@ -140,16 +173,19 @@ export default function GameCanvas({
         onPauseChange?.(next)
       }
 
-      // Layer 1: 底 + 静态地形（brick/steel/water/ice/base）
+      const map = mapRef.current
+
+      // Layer 1: 底 + 静态地形
       renderSystem.drawBackground(ctx)
-      renderSystem.drawTerrainBelow(ctx, level.map)
+      renderSystem.drawTerrainBelow(ctx, map)
 
-      // Layer 2: 玩家坦克 + 临时粒子
+      // Layer 2: 玩家坦克 + 子弹 + 爆炸
       renderSystem.drawTank(ctx, tankRef.current)
-      drawParticles(ctx, particlesRef.current)
+      for (const b of bulletsRef.current) renderSystem.drawBullet(ctx, b)
+      for (const e of explosionsRef.current) renderSystem.drawExplosion(ctx, e)
 
-      // Layer 3: grass（在坦克之上，红白机原版「草丛遮蔽」效果）
-      renderSystem.drawTerrainAbove(ctx, level.map)
+      // Layer 3: grass（在坦克之上）
+      renderSystem.drawTerrainAbove(ctx, map)
 
       if (engine.isPaused()) drawPauseOverlay(ctx)
     },
@@ -160,13 +196,17 @@ export default function GameCanvas({
   }, [stats, onStats])
 
   useEffect(() => {
-    if (!onInput && !onTankChange) return
+    if (!onInput && !onTankChange && !onBulletsChange) return
     const id = window.setInterval(() => {
       onInput?.(lastIntentRef.current)
       onTankChange?.(tankRef.current)
+      if (onBulletsChange) {
+        const alive = countAliveBulletsByOwner(bulletsRef.current, tankRef.current.id)
+        onBulletsChange(alive, PLAYER_MAX_BULLETS)
+      }
     }, 100)
     return () => window.clearInterval(id)
-  }, [onInput, onTankChange])
+  }, [onInput, onTankChange, onBulletsChange])
 
   return (
     <canvas

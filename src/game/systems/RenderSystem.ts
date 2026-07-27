@@ -10,13 +10,15 @@
  * - {@link drawTerrainAbove}：仅绘制 grass（在坦克之上，用于遮蔽/掩护）。
  * - {@link drawBackground}：填充黑色画布底 + 可选调试网格。
  * - {@link drawTank}：绘制坦克实体（T-08 起接入 Tank 数据结构）。
+ * - {@link drawBullet}：绘制子弹（T-09 起接入 Bullet）。
+ * - {@link drawExplosion}：绘制爆炸粒子帧（T-09 起接入 Explosion）。
  *
  * 分层原因：经典红白机《Battle City》的草丛会遮挡坦克，钢/砖/水/冰/base
  * 则永远在坦克之下。把 grass 抽成上层是最贴合语义、也最省状态的做法。
  */
 
 import { CANVAS_HEIGHT, CANVAS_WIDTH, PALETTE, TILE_CODE, TILE_SIZE } from '../constants'
-import type { Direction, LevelMap, Tank, TankKind } from '../types'
+import type { Bullet, Direction, Explosion, LevelMap, Tank, TankKind } from '../types'
 
 export interface RenderSystemOptions {
   /** 调试用网格线（每 tile 一根 1px 深色线）；默认 false。 */
@@ -96,6 +98,50 @@ export class RenderSystem {
       if (phase === 1) return
     }
     drawTankSprite(ctx, tank.x, tank.y, tank.dir, tank.kind)
+  }
+
+  /**
+   * 绘制单发子弹。8×8 白色方块 + 前方 2px 拖尾。
+   * power=2（可击破钢块）子弹显示为亮青色，与普通子弹区分。
+   */
+  drawBullet(ctx: CanvasRenderingContext2D, bullet: Bullet): void {
+    if (!bullet.alive) return
+    ctx.fillStyle = bullet.power === 2 ? '#8ee8ff' : PALETTE.bullet
+    ctx.fillRect(Math.round(bullet.x), Math.round(bullet.y), bullet.w, bullet.h)
+    // 拖尾：向 dir 反方向多画 2px，让高速子弹更有速度感。
+    const v = BULLET_TAIL_VECTORS[bullet.dir]
+    ctx.fillRect(
+      Math.round(bullet.x + v.x),
+      Math.round(bullet.y + v.y),
+      v.x === 0 ? bullet.w : 2,
+      v.y === 0 ? bullet.h : 2,
+    )
+  }
+
+  /**
+   * 绘制爆炸帧动画。基于 explosion.ttl 派生帧号 —— 无需外部时钟。
+   * 3 帧：小 → 中 → 大，共 0.3s。tank 类型的爆炸半径更大。
+   */
+  drawExplosion(ctx: CanvasRenderingContext2D, explosion: Explosion): void {
+    if (explosion.ttl <= 0) return
+    const isTank = explosion.w >= TILE_SIZE
+    const cx = explosion.x + explosion.w / 2
+    const cy = explosion.y + explosion.h / 2
+    const frame = explosion.frame
+    const base = isTank ? 6 : 3
+    const size = base + frame * (isTank ? 5 : 3)
+    ctx.fillStyle = frame === 2 ? '#f2b431' : '#ffffff'
+    // 十字花瓣型爆炸
+    ctx.fillRect(cx - size, cy - 2, size * 2, 4)
+    ctx.fillRect(cx - 2, cy - size, 4, size * 2)
+    if (isTank && frame >= 1) {
+      ctx.fillStyle = '#b34a20'
+      const s2 = size - 2
+      ctx.fillRect(cx - s2, cy - s2, 4, 4)
+      ctx.fillRect(cx + s2 - 4, cy - s2, 4, 4)
+      ctx.fillRect(cx - s2, cy + s2 - 4, 4, 4)
+      ctx.fillRect(cx + s2 - 4, cy + s2 - 4, 4, 4)
+    }
   }
 
   private drawGridLines(ctx: CanvasRenderingContext2D): void {
@@ -190,6 +236,14 @@ function drawBase(ctx: CanvasRenderingContext2D, x: number, y: number): void {
 // ─── 坦克绘制单元 ────────────────────────────────────────────────────────────
 // 32×32 tile：4px 履带 × 2（左右两侧）+ 22px 主车体 + 8px 炮管。
 // dir 决定履带方位与炮管指向；kind 决定色调（后续接敌军种类）。
+
+/** 子弹拖尾偏移向量：向 dir 反方向偏 2px。 */
+const BULLET_TAIL_VECTORS: Record<Direction, { x: number; y: number }> = {
+  up: { x: 0, y: 2 },
+  down: { x: 0, y: -2 },
+  left: { x: 2, y: 0 },
+  right: { x: -2, y: 0 },
+}
 
 function tankPalette(kind: TankKind): { body: string; track: string; barrel: string } {
   const p = PALETTE.tank
