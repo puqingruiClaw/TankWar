@@ -23,7 +23,7 @@ import {
   MAX_ENEMIES_ON_FIELD,
   TILE_SIZE,
 } from '../constants'
-import { createEnemyTank } from '../entities/Tank'
+import { createEnemyTank, isEnemyTank } from '../entities/Tank'
 import { rectsIntersect, makeRect } from '../utils/grid'
 import { canTankOccupy } from './MovementSystem'
 import type { EnemyKind, LevelMap, Tank } from '../types'
@@ -172,6 +172,6 @@ export function pruneDeadEnemies(enemies: Tank[]): number {
 /** 统计 tanks 中"敌军且存活"的数量。SpawnManager 内部与 HUD 都会用。 */
 export function countAliveEnemies(tanks: readonly Tank[]): number {
   let n = 0
-  for (const t of tanks) if (t.alive && t.kind !== 'player') n++
+  for (const t of tanks) if (t.alive && isEnemyTank(t)) n++
   return n
 }

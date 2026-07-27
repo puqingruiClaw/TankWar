@@ -175,27 +175,36 @@ export const isRectFreeForTank = canOccupy
 /**
  * 敌军的最小驱动 —— T-10 落地的"占位 AI"。
  *
- * 逻辑极简：沿当前 dir 前进；若这一帧结果是 blocked=true 或没有 dir，就从
- * 4 个方向里随机挑一个"下一格能占据"的方向；一个都没有则保持原方向。
+ * 逻辑：
+ * 1. 先按当前 dir 前进；成功 → 直接返回。
+ * 2. 撞墙或未移动 → 把"除当前方向外的 3 个方向"做 Fisher-Yates 洗牌，
+ *    依次探测"下一格是否可占据"，第一个可行方向即换向并再走一步。
+ * 3. 三个方向都不可行 → 保持原方向（等下一帧再试）。
  *
- * T-11 引入正式 AI 后，这个函数会被替换为 FSM + 视线检测；届时保留
- * 同签名以便切换。
+ * 相比"随机抽 4 次再判 continue"的旧写法：
+ * - 消除了"连抽当前方向 → 空转"的极端情况；
+ * - 保证同一帧内最多 3 次探测且方向不重复，卡墙更快脱困。
  *
- * @returns 本帧最终的 MoveResult（供 GameCanvas 做爆炸/掉血额外反馈）
+ * @param nextRandom 返回 [0,1) 的随机数生成器（由调用方注入 Rng 保证可复现）。
  */
 export function stepEnemyPatrol(
   map: LevelMap,
   tank: Tank,
   dt: number,
-  pickRandomDir: () => Direction,
+  nextRandom: () => number,
 ): MoveResult {
   const result = updateTank(map, tank, dt)
   if (!result.blocked && result.moved) return result
 
-  // 撞墙或无移动：尝试换方向。最多 4 次试探，避免死循环。
-  for (let i = 0; i < 4; i++) {
-    const candidate = pickRandomDir()
-    if (candidate === tank.dir) continue
+  // 剔除当前方向，得到 3 个候选，再 Fisher-Yates 洗牌。
+  const candidates: Direction[] = []
+  for (const d of DIR_POOL) if (d !== tank.dir) candidates.push(d)
+  for (let i = candidates.length - 1; i > 0; i--) {
+    const j = Math.floor(nextRandom() * (i + 1))
+    ;[candidates[i], candidates[j]] = [candidates[j], candidates[i]]
+  }
+
+  for (const candidate of candidates) {
     const v = DIR_VECTORS[candidate]
     const probe = makeRect(tank.x + v.x, tank.y + v.y, tank.w, tank.h)
     if (canOccupy(map, probe)) {
@@ -205,3 +214,5 @@ export function stepEnemyPatrol(
   }
   return result
 }
+
+const DIR_POOL: readonly Direction[] = ['up', 'down', 'left', 'right']

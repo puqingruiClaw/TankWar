@@ -20,6 +20,7 @@
  */
 
 import { CANVAS_HEIGHT, CANVAS_WIDTH, TILE_CODE, TILE_SIZE } from '../constants'
+import { isEnemyTank } from '../entities/Tank'
 import {
   forEachOverlappedCell,
   inGridBounds,
@@ -112,7 +113,7 @@ export function stepBullets(options: StepBulletsOptions): Bullet[] {
       if (!tank.alive) continue
       if (tank.id === b.ownerId) continue // 不自伤
       // 同阵营免伤（玩家不打玩家、敌军不打敌军）；T-11 敌军 AI 会用到。
-      const targetIsEnemy = tank.kind !== 'player'
+      const targetIsEnemy = isEnemyTank(tank)
       if (b.fromEnemy === targetIsEnemy) continue
       if (!rectsIntersect(bulletRect(b), tankRect(tank))) continue
 
@@ -133,8 +134,8 @@ export function stepBullets(options: StepBulletsOptions): Bullet[] {
         const cx = tank.x + tank.w / 2
         const cy = tank.y + tank.h / 2
         events?.onExplosion?.(cx, cy, 'tank')
-        if (tank.kind === 'player') events?.onPlayerKilled?.(tank)
-        else events?.onEnemyKilled?.(tank)
+        if (isEnemyTank(tank)) events?.onEnemyKilled?.(tank)
+        else events?.onPlayerKilled?.(tank)
       } else {
         events?.onExplosion?.(b.x + b.w / 2, b.y + b.h / 2, 'bullet')
       }

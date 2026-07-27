@@ -8,7 +8,7 @@
  */
 
 import { BULLET_SPEED, TILE_SIZE } from '../constants'
-import { allocEntityId } from './Tank'
+import { allocEntityId, isEnemyTank } from './Tank'
 import type { Bullet, Direction, Tank } from '../types'
 
 /** 子弹方形边长（像素）。红白机原版为 3×3，本项目放大到 8×8 更清晰。 */
@@ -34,7 +34,7 @@ export function createBullet(tank: Tank): Bullet {
   const originX = cx + v.x * (TILE_SIZE / 2) - BULLET_SIZE / 2
   const originY = cy + v.y * (TILE_SIZE / 2) - BULLET_SIZE / 2
 
-  const fromEnemy = tank.kind !== 'player'
+  const fromEnemy = isEnemyTank(tank)
   const power: 1 | 2 = tank.kind === 'power' || tank.level >= 3 ? 2 : 1
   const speed =
     tank.kind === 'fast' || tank.kind === 'power' ? BULLET_SPEED.FAST : BULLET_SPEED.NORMAL

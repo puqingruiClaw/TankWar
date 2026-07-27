@@ -65,6 +65,8 @@ export default function PlayPage() {
 
   const enemiesLeft = enemies.field + enemies.queue
   const subtitle = baseDown ? 'BASE DESTROYED' : paused ? 'PAUSED' : `${enemiesLeft} ENEMIES LEFT`
+  const totalEnemies = level.enemyQueue.length
+  const spawnedCount = Math.min(totalEnemies, enemies.totalSpawned)
   const tankCol = Math.floor(tank.x / TILE_SIZE)
   const tankRow = Math.floor(tank.y / TILE_SIZE)
   const shieldOn = tank.invulnerable > 0
@@ -88,12 +90,19 @@ export default function PlayPage() {
           <div>
             <p className="font-pixel text-pixel-sm text-outline">ENEMIES</p>
             <div className="mt-2 grid grid-cols-4 gap-1">
-              {Array.from({ length: enemies.queue }).map((_, i) => (
-                <div key={i} className="h-3 w-3 bg-tank-enemyBasic" aria-hidden />
-              ))}
+              {Array.from({ length: totalEnemies }).map((_, i) => {
+                const consumed = i < spawnedCount
+                return (
+                  <div
+                    key={i}
+                    className={`h-3 w-3 ${consumed ? 'bg-outline opacity-40' : 'bg-tank-enemyBasic'}`}
+                    aria-hidden
+                  />
+                )
+              })}
             </div>
             <p className="mt-2 font-pixel text-pixel-sm text-white">
-              FIELD <span className="text-hud-accent">{enemies.field}</span>
+              FIELD <span className="text-tank-enemyBasic">{enemies.field}</span>
               <span className="ml-2">
                 QUEUE <span className="text-hud-accent">{enemies.queue}</span>
               </span>

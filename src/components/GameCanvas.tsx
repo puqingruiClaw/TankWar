@@ -29,15 +29,7 @@ import { createRng } from '@/game/utils/rng'
 import { useGameLoop } from '@/hooks/useGameLoop'
 import { useKeyboard } from '@/hooks/useKeyboard'
 import type { EngineStats } from '@/game/GameEngine'
-import type {
-  Bullet,
-  Direction,
-  EntityId,
-  Explosion,
-  InputIntent,
-  LevelDefinition,
-  Tank,
-} from '@/game/types'
+import type { Bullet, EntityId, Explosion, InputIntent, LevelDefinition, Tank } from '@/game/types'
 
 interface GameCanvasProps {
   onStats?: (stats: EngineStats) => void
@@ -62,7 +54,12 @@ interface GameCanvasProps {
 const EXPLOSION_TTL = 0.3
 const EXPLOSION_FRAME_DURATION = EXPLOSION_TTL / 3
 
-const DIR_POOL: Direction[] = ['up', 'down', 'left', 'right']
+/**
+ * 每帧组合 player+enemies 用的复用数组。放到 module scope 是为了避免
+ * 在 hot path（onUpdate 每秒 60 次、内部还被 spawn/stepBullets 调用两次）
+ * 反复 new Array 引发 GC 抖动；GameCanvas 单实例挂载，因此可安全共享。
+ */
+const scratchTanks: Tank[] = []
 
 /** 生成一次爆炸；`kind='tank'` 时半径更大。 */
 function spawnExplosion(
@@ -144,7 +141,9 @@ export default function GameCanvas({
     explosionsRef.current = []
     mapRef.current = level.map.map((row) => [...row])
     spawnerRef.current = new SpawnManager({ queue: level.enemyQueue })
-  }, [level])
+    // 让 HUD 立刻感知新关卡的 queue 长度，而不是等下一次 100ms 轮询。
+    onEnemiesChange?.({ field: 0, queue: level.enemyQueue.length, totalSpawned: 0 })
+  }, [level, onEnemiesChange])
 
   const { engine, stats } = useGameLoop(canvasRef, {
     onUpdate: (dt) => {
@@ -171,20 +170,24 @@ export default function GameCanvas({
       }
 
       // 3) 敌军刷新（受 MAX_ENEMIES_ON_FIELD + 出生点占用 限制）
-      const spawnResult = spawnerRef.current.step({ map, tanks: enemyAndPlayer(enemies, tank), dt })
+      const spawnResult = spawnerRef.current.step({
+        map,
+        tanks: refreshScratchTanks(enemies, tank),
+        dt,
+      })
       if (spawnResult.spawned.length > 0) enemies.push(...spawnResult.spawned)
 
       // 4) 敌军移动（T-10 用最小巡逻 AI 占位；T-11 会替换为正式 AI）
       for (const e of enemies) {
         if (!e.alive) continue
-        stepEnemyPatrol(map, e, dt, () => DIR_POOL[Math.floor(rng.next() * DIR_POOL.length)])
+        stepEnemyPatrol(map, e, dt, () => rng.next())
       }
 
       // 5) 推进子弹 & 命中判定；敌军作为可命中目标一起传入。
       stepBullets({
         map,
         bullets,
-        tanks: enemyAndPlayer(enemies, tank),
+        tanks: refreshScratchTanks(enemies, tank),
         dt,
         events: {
           onExplosion: (x, y, kind) =>
@@ -268,13 +271,15 @@ export default function GameCanvas({
 }
 
 /**
- * 组合 enemies + player 为一个只读数组，避免每帧手动拼接。
- * 复用一个数组常量能省掉极小的分配开销，但更重要的是让"传给 System 的 tanks
- * 语义"集中在一个地方，看代码时不会漏。
+ * 用 module-scope 的 [scratchTanks](file:///Users/puqingrui/workspace/Projects/TankWar/src/components/GameCanvas.tsx#L69-L69)
+ * 复用同一个数组来组合 enemies + player：
+ * - 清空后按 (enemies..., player) 顺序 push；
+ * - 返回同一引用，调用方**只在本帧同步使用**，不得跨帧持有。
+ * 单实例前提下不会有并发写；如果未来引入多 GameCanvas，需要改成实例级 ref。
  */
-function enemyAndPlayer(enemies: Tank[], player: Tank): Tank[] {
-  const arr = new Array<Tank>(enemies.length + 1)
-  for (let i = 0; i < enemies.length; i++) arr[i] = enemies[i]
-  arr[enemies.length] = player
-  return arr
+function refreshScratchTanks(enemies: readonly Tank[], player: Tank): Tank[] {
+  scratchTanks.length = 0
+  for (let i = 0; i < enemies.length; i++) scratchTanks.push(enemies[i])
+  scratchTanks.push(player)
+  return scratchTanks
 }

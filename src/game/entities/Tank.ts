@@ -25,6 +25,17 @@ export function resetEntityIdForTests(): void {
   nextEntityId = 1
 }
 
+/**
+ * 判定一个坦克是否属于敌军。
+ * 目前实现为 `t.kind !== 'player'`，抽出来统一入口是为了：
+ * - 避免在多个 system 里重复散写字符串比较；
+ * - 未来接入 2P（Tank.kind='player' 但玩家阵营区分 1P/2P）或"友军 AI"时，
+ *   只需改这一个函数即可保持全项目语义一致。
+ */
+export function isEnemyTank(t: Tank): boolean {
+  return t.kind !== 'player'
+}
+
 export interface CreatePlayerTankOptions {
   /** 1P=0（默认，出生在左下）、2P=1（出生在右下）。 */
   slot?: 0 | 1
