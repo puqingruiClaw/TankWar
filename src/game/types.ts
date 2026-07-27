@@ -51,6 +51,9 @@ export interface Entity extends Rect {
 
 export type TankKind = 'player' | 'basic' | 'fast' | 'power' | 'armor'
 
+/** 敌军坦克类型（排除 'player'），用于关卡刷新队列 / AI。 */
+export type EnemyKind = Exclude<TankKind, 'player'>
+
 /** 玩家火力等级：0 基础，1 快速，2 双弹，3 打钢。*/
 export type PlayerLevel = 0 | 1 | 2 | 3
 
@@ -104,7 +107,7 @@ export interface LevelDefinition {
   name: string
   map: LevelMap
   /** 该关敌军类型序列（长度需等于 ENEMIES_PER_STAGE）。*/
-  enemyQueue: TankKind[]
+  enemyQueue: EnemyKind[]
 }
 
 // ─── 游戏状态 ────────────────────────────────────────────────────────────────

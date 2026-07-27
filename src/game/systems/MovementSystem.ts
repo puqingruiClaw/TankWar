@@ -171,3 +171,37 @@ export function canTankOccupy(map: LevelMap, x: number, y: number): boolean {
 
 /** 单元测试友好：暴露 canOccupy 私有工具的对外别名。 */
 export const isRectFreeForTank = canOccupy
+
+/**
+ * 敌军的最小驱动 —— T-10 落地的"占位 AI"。
+ *
+ * 逻辑极简：沿当前 dir 前进；若这一帧结果是 blocked=true 或没有 dir，就从
+ * 4 个方向里随机挑一个"下一格能占据"的方向；一个都没有则保持原方向。
+ *
+ * T-11 引入正式 AI 后，这个函数会被替换为 FSM + 视线检测；届时保留
+ * 同签名以便切换。
+ *
+ * @returns 本帧最终的 MoveResult（供 GameCanvas 做爆炸/掉血额外反馈）
+ */
+export function stepEnemyPatrol(
+  map: LevelMap,
+  tank: Tank,
+  dt: number,
+  pickRandomDir: () => Direction,
+): MoveResult {
+  const result = updateTank(map, tank, dt)
+  if (!result.blocked && result.moved) return result
+
+  // 撞墙或无移动：尝试换方向。最多 4 次试探，避免死循环。
+  for (let i = 0; i < 4; i++) {
+    const candidate = pickRandomDir()
+    if (candidate === tank.dir) continue
+    const v = DIR_VECTORS[candidate]
+    const probe = makeRect(tank.x + v.x, tank.y + v.y, tank.w, tank.h)
+    if (canOccupy(map, probe)) {
+      tank.dir = candidate
+      return updateTank(map, tank, dt)
+    }
+  }
+  return result
+}

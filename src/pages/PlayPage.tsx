@@ -36,6 +36,11 @@ export default function PlayPage() {
   const [paused, setPaused] = useState(false)
   const [bulletsAlive, setBulletsAlive] = useState(0)
   const [baseDown, setBaseDown] = useState(false)
+  const [enemies, setEnemies] = useState<{ field: number; queue: number; totalSpawned: number }>({
+    field: 0,
+    queue: level.enemyQueue.length,
+    totalSpawned: 0,
+  })
 
   const handleStats = useCallback((s: EngineStats) => setStats(s), [])
   const handleInput = useCallback((i: InputIntent) => setIntent(i), [])
@@ -53,12 +58,13 @@ export default function PlayPage() {
   }, [])
   const handleBullets = useCallback((alive: number) => setBulletsAlive(alive), [])
   const handleBaseHit = useCallback(() => setBaseDown(true), [])
+  const handleEnemies = useCallback(
+    (info: { field: number; queue: number; totalSpawned: number }) => setEnemies(info),
+    [],
+  )
 
-  const subtitle = baseDown
-    ? 'BASE DESTROYED'
-    : paused
-      ? 'PAUSED'
-      : `${level.enemyQueue.length} ENEMIES LEFT`
+  const enemiesLeft = enemies.field + enemies.queue
+  const subtitle = baseDown ? 'BASE DESTROYED' : paused ? 'PAUSED' : `${enemiesLeft} ENEMIES LEFT`
   const tankCol = Math.floor(tank.x / TILE_SIZE)
   const tankRow = Math.floor(tank.y / TILE_SIZE)
   const shieldOn = tank.invulnerable > 0
@@ -74,6 +80,7 @@ export default function PlayPage() {
           onTankChange={handleTank}
           onPauseChange={handlePause}
           onBulletsChange={handleBullets}
+          onEnemiesChange={handleEnemies}
           onBaseHit={handleBaseHit}
         />
 
@@ -81,10 +88,16 @@ export default function PlayPage() {
           <div>
             <p className="font-pixel text-pixel-sm text-outline">ENEMIES</p>
             <div className="mt-2 grid grid-cols-4 gap-1">
-              {Array.from({ length: level.enemyQueue.length }).map((_, i) => (
+              {Array.from({ length: enemies.queue }).map((_, i) => (
                 <div key={i} className="h-3 w-3 bg-tank-enemyBasic" aria-hidden />
               ))}
             </div>
+            <p className="mt-2 font-pixel text-pixel-sm text-white">
+              FIELD <span className="text-hud-accent">{enemies.field}</span>
+              <span className="ml-2">
+                QUEUE <span className="text-hud-accent">{enemies.queue}</span>
+              </span>
+            </p>
           </div>
 
           <div className="mt-4">

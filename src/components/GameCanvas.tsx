@@ -1,12 +1,14 @@
 /**
  * GameCanvas —— React 侧的画布外壳。
  *
- * T-09 起接入真正的 Bullet + CollisionSystem，取代 T-08 的临时粒子：
+ * T-10 起接入 SpawnManager + 敌军坦克数组：
  *   Layer1 底 + 静态地形（brick/steel/water/ice/base）
- * → Layer2 坦克 + 子弹 + 爆炸（真实碰撞，砖块可破、钢块需 power=2 才破）
+ * → Layer2 玩家坦克 + 敌军坦克 + 子弹 + 爆炸
  * → Layer3 grass（在坦克之上，实现红白机原版「草丛遮蔽」）
  *
- * 事件：base 被击中会通过 onBaseHit 冒泡到 PlayPage，供后续 T-12 game-over 场景使用。
+ * 事件：
+ * - `onBaseHit`：基地被击中 → PlayPage 切 game-over 提示（T-12 会做完整场景）。
+ * - `onEnemiesChange`：场上/剩余敌军数变化时冒泡给 HUD。
  * 输入：↑↓←→ / WASD 移动，Space 开火（PLAYER_MAX_BULLETS 上限），Esc 切 pause/resume。
  */
 
@@ -20,12 +22,22 @@ import {
   pruneDeadBullets,
   stepBullets,
 } from '@/game/systems/CollisionSystem'
-import { updateTank } from '@/game/systems/MovementSystem'
+import { stepEnemyPatrol, updateTank } from '@/game/systems/MovementSystem'
 import { RenderSystem } from '@/game/systems/RenderSystem'
+import { SpawnManager, countAliveEnemies, pruneDeadEnemies } from '@/game/systems/SpawnManager'
+import { createRng } from '@/game/utils/rng'
 import { useGameLoop } from '@/hooks/useGameLoop'
 import { useKeyboard } from '@/hooks/useKeyboard'
 import type { EngineStats } from '@/game/GameEngine'
-import type { Bullet, EntityId, Explosion, InputIntent, LevelDefinition, Tank } from '@/game/types'
+import type {
+  Bullet,
+  Direction,
+  EntityId,
+  Explosion,
+  InputIntent,
+  LevelDefinition,
+  Tank,
+} from '@/game/types'
 
 interface GameCanvasProps {
   onStats?: (stats: EngineStats) => void
@@ -35,6 +47,8 @@ interface GameCanvasProps {
   onTankChange?: (tank: Tank) => void
   /** 观察子弹阵列长度（HUD 用），供显示"存活 / MAX"。 */
   onBulletsChange?: (aliveCount: number, max: number) => void
+  /** 敌军数量变化：field 当前场上、queue 剩余待刷、totalSpawned 累计已刷。 */
+  onEnemiesChange?: (info: { field: number; queue: number; totalSpawned: number }) => void
   /** 基地被击中：调用方切 game-over 场景（T-12）。目前只做视觉提示。 */
   onBaseHit?: () => void
   /** 关卡定义；默认使用 STAGE 01（T-07 内置首关）。 */
@@ -47,6 +61,8 @@ interface GameCanvasProps {
 /** 爆炸单帧持续 0.1s，共 3 帧 = 0.3s。 */
 const EXPLOSION_TTL = 0.3
 const EXPLOSION_FRAME_DURATION = EXPLOSION_TTL / 3
+
+const DIR_POOL: Direction[] = ['up', 'down', 'left', 'right']
 
 /** 生成一次爆炸；`kind='tank'` 时半径更大。 */
 function spawnExplosion(
@@ -100,6 +116,7 @@ export default function GameCanvas({
   onPauseChange,
   onTankChange,
   onBulletsChange,
+  onEnemiesChange,
   onBaseHit,
   level = DEFAULT_LEVEL,
   showGrid = false,
@@ -109,19 +126,24 @@ export default function GameCanvas({
   const input = useKeyboard()
   const renderSystem = useMemo(() => new RenderSystem({ showGrid }), [showGrid])
   const tankRef = useRef<Tank>(createPlayerTank())
+  const enemiesRef = useRef<Tank[]>([])
   const bulletsRef = useRef<Bullet[]>([])
   const explosionsRef = useRef<Explosion[]>([])
   // 关卡地图会被子弹击中砖块修改，因此需要深拷贝一份到 ref。
   const mapRef = useRef<LevelDefinition['map']>(level.map.map((row) => [...row]))
+  const spawnerRef = useRef<SpawnManager>(new SpawnManager({ queue: level.enemyQueue }))
+  const rngRef = useRef(createRng())
   const [paused, setPaused] = useState(false)
   const lastIntentRef = useRef<InputIntent>({ dir: null, fire: false, pausePressed: false })
 
-  // 切关卡时重置所有动态实体 + 深拷贝地图。
+  // 切关卡时重置所有动态实体 + 深拷贝地图 + 新建 SpawnManager。
   useEffect(() => {
     tankRef.current = createPlayerTank()
+    enemiesRef.current = []
     bulletsRef.current = []
     explosionsRef.current = []
     mapRef.current = level.map.map((row) => [...row])
+    spawnerRef.current = new SpawnManager({ queue: level.enemyQueue })
   }, [level])
 
   const { engine, stats } = useGameLoop(canvasRef, {
@@ -130,13 +152,16 @@ export default function GameCanvas({
       const fireEdge = input.consumeFireEdge()
 
       const tank = tankRef.current
+      const enemies = enemiesRef.current
       const bullets = bulletsRef.current
       const explosions = explosionsRef.current
       const map = mapRef.current
+      const rng = rngRef.current
 
+      // 1) 玩家推进
       updateTank(map, tank, dt, { intent })
 
-      // 开火：受冷却 + PLAYER_MAX_BULLETS 双重限制。
+      // 2) 玩家开火：受冷却 + PLAYER_MAX_BULLETS 双重限制。
       if (fireEdge && canTankFire(tank)) {
         const owned = countAliveBulletsByOwner(bullets, tank.id)
         if (owned < PLAYER_MAX_BULLETS) {
@@ -145,11 +170,21 @@ export default function GameCanvas({
         }
       }
 
-      // 推进 & 命中判定（就地修改 bullets/tanks/map）。
+      // 3) 敌军刷新（受 MAX_ENEMIES_ON_FIELD + 出生点占用 限制）
+      const spawnResult = spawnerRef.current.step({ map, tanks: enemyAndPlayer(enemies, tank), dt })
+      if (spawnResult.spawned.length > 0) enemies.push(...spawnResult.spawned)
+
+      // 4) 敌军移动（T-10 用最小巡逻 AI 占位；T-11 会替换为正式 AI）
+      for (const e of enemies) {
+        if (!e.alive) continue
+        stepEnemyPatrol(map, e, dt, () => DIR_POOL[Math.floor(rng.next() * DIR_POOL.length)])
+      }
+
+      // 5) 推进子弹 & 命中判定；敌军作为可命中目标一起传入。
       stepBullets({
         map,
         bullets,
-        tanks: [tank],
+        tanks: enemyAndPlayer(enemies, tank),
         dt,
         events: {
           onExplosion: (x, y, kind) =>
@@ -158,6 +193,7 @@ export default function GameCanvas({
         },
       })
       pruneDeadBullets(bullets)
+      pruneDeadEnemies(enemies)
       stepExplosions(explosions, dt)
 
       lastIntentRef.current = intent
@@ -179,8 +215,9 @@ export default function GameCanvas({
       renderSystem.drawBackground(ctx)
       renderSystem.drawTerrainBelow(ctx, map)
 
-      // Layer 2: 玩家坦克 + 子弹 + 爆炸
+      // Layer 2: 玩家 + 敌军 + 子弹 + 爆炸
       renderSystem.drawTank(ctx, tankRef.current)
+      for (const e of enemiesRef.current) renderSystem.drawTank(ctx, e)
       for (const b of bulletsRef.current) renderSystem.drawBullet(ctx, b)
       for (const e of explosionsRef.current) renderSystem.drawExplosion(ctx, e)
 
@@ -196,7 +233,7 @@ export default function GameCanvas({
   }, [stats, onStats])
 
   useEffect(() => {
-    if (!onInput && !onTankChange && !onBulletsChange) return
+    if (!onInput && !onTankChange && !onBulletsChange && !onEnemiesChange) return
     const id = window.setInterval(() => {
       onInput?.(lastIntentRef.current)
       onTankChange?.(tankRef.current)
@@ -204,9 +241,18 @@ export default function GameCanvas({
         const alive = countAliveBulletsByOwner(bulletsRef.current, tankRef.current.id)
         onBulletsChange(alive, PLAYER_MAX_BULLETS)
       }
+      if (onEnemiesChange) {
+        const field = countAliveEnemies(enemiesRef.current)
+        const queue = spawnerRef.current.queueLength()
+        onEnemiesChange({
+          field,
+          queue,
+          totalSpawned: spawnerRef.current.totalSpawnedCount(),
+        })
+      }
     }, 100)
     return () => window.clearInterval(id)
-  }, [onInput, onTankChange, onBulletsChange])
+  }, [onInput, onTankChange, onBulletsChange, onEnemiesChange])
 
   return (
     <canvas
@@ -219,4 +265,16 @@ export default function GameCanvas({
       data-paused={paused}
     />
   )
+}
+
+/**
+ * 组合 enemies + player 为一个只读数组，避免每帧手动拼接。
+ * 复用一个数组常量能省掉极小的分配开销，但更重要的是让"传给 System 的 tanks
+ * 语义"集中在一个地方，看代码时不会漏。
+ */
+function enemyAndPlayer(enemies: Tank[], player: Tank): Tank[] {
+  const arr = new Array<Tank>(enemies.length + 1)
+  for (let i = 0; i < enemies.length; i++) arr[i] = enemies[i]
+  arr[enemies.length] = player
+  return arr
 }
