@@ -173,46 +173,9 @@ export function canTankOccupy(map: LevelMap, x: number, y: number): boolean {
 export const isRectFreeForTank = canOccupy
 
 /**
- * 敌军的最小驱动 —— T-10 落地的"占位 AI"。
- *
- * 逻辑：
- * 1. 先按当前 dir 前进；成功 → 直接返回。
- * 2. 撞墙或未移动 → 把"除当前方向外的 3 个方向"做 Fisher-Yates 洗牌，
- *    依次探测"下一格是否可占据"，第一个可行方向即换向并再走一步。
- * 3. 三个方向都不可行 → 保持原方向（等下一帧再试）。
- *
- * 相比"随机抽 4 次再判 continue"的旧写法：
- * - 消除了"连抽当前方向 → 空转"的极端情况；
- * - 保证同一帧内最多 3 次探测且方向不重复，卡墙更快脱困。
- *
- * @param nextRandom 返回 [0,1) 的随机数生成器（由调用方注入 Rng 保证可复现）。
+ * T-10 曾在此提供占位的 `stepEnemyPatrol` 随机巡逻。
+ * T-11 起已由 [stepEnemyAI](./AISystem.ts#L95-L123) 完全取代 ——
+ * AI 输出 `{ desiredDir, wantFire }`，调用方仍走
+ * [updateTank(map, tank, dt, { forcedDir })](#L136-L162) 驱动移动，
+ * 保证玩家与敌军共享同一套地形碰撞规则。
  */
-export function stepEnemyPatrol(
-  map: LevelMap,
-  tank: Tank,
-  dt: number,
-  nextRandom: () => number,
-): MoveResult {
-  const result = updateTank(map, tank, dt)
-  if (!result.blocked && result.moved) return result
-
-  // 剔除当前方向，得到 3 个候选，再 Fisher-Yates 洗牌。
-  const candidates: Direction[] = []
-  for (const d of DIR_POOL) if (d !== tank.dir) candidates.push(d)
-  for (let i = candidates.length - 1; i > 0; i--) {
-    const j = Math.floor(nextRandom() * (i + 1))
-    ;[candidates[i], candidates[j]] = [candidates[j], candidates[i]]
-  }
-
-  for (const candidate of candidates) {
-    const v = DIR_VECTORS[candidate]
-    const probe = makeRect(tank.x + v.x, tank.y + v.y, tank.w, tank.h)
-    if (canOccupy(map, probe)) {
-      tank.dir = candidate
-      return updateTank(map, tank, dt)
-    }
-  }
-  return result
-}
-
-const DIR_POOL: readonly Direction[] = ['up', 'down', 'left', 'right']

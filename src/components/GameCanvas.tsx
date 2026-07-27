@@ -1,7 +1,11 @@
 /**
  * GameCanvas —— React 侧的画布外壳。
  *
- * T-10 起接入 SpawnManager + 敌军坦克数组：
+ * T-10 起接入 SpawnManager + 敌军坦克数组；T-11 起接入 AISystem，
+ * 敌军移动改由 [stepEnemyAI](../game/systems/AISystem.ts#L95-L123) 输出意图 +
+ * [updateTank](../game/systems/MovementSystem.ts#L136-L162) 执行，敌军开火受
+ * [canTankFire](../game/entities/Bullet.ts) 与 [ENEMY_MAX_BULLETS](../game/constants.ts#L115) 双重限制。
+ *
  *   Layer1 底 + 静态地形（brick/steel/water/ice/base）
  * → Layer2 玩家坦克 + 敌军坦克 + 子弹 + 爆炸
  * → Layer3 grass（在坦克之上，实现红白机原版「草丛遮蔽」）
@@ -13,21 +17,30 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { CANVAS_HEIGHT, CANVAS_WIDTH, PLAYER_MAX_BULLETS, TANK_COOLDOWN } from '@/game/constants'
+import {
+  BASE_POSITION,
+  CANVAS_HEIGHT,
+  CANVAS_WIDTH,
+  ENEMY_MAX_BULLETS,
+  PLAYER_MAX_BULLETS,
+  TANK_COOLDOWN,
+} from '@/game/constants'
 import { canTankFire, createBullet } from '@/game/entities/Bullet'
 import { createPlayerTank } from '@/game/entities/Tank'
 import { DEFAULT_LEVEL } from '@/game/maps/levels'
+import { pruneAIMemory, resetAIMemory, stepEnemyAI } from '@/game/systems/AISystem'
 import {
   countAliveBulletsByOwner,
   pruneDeadBullets,
   stepBullets,
 } from '@/game/systems/CollisionSystem'
-import { stepEnemyPatrol, updateTank } from '@/game/systems/MovementSystem'
+import { updateTank } from '@/game/systems/MovementSystem'
 import { RenderSystem } from '@/game/systems/RenderSystem'
 import { SpawnManager, countAliveEnemies, pruneDeadEnemies } from '@/game/systems/SpawnManager'
 import { createRng } from '@/game/utils/rng'
 import { useGameLoop } from '@/hooks/useGameLoop'
 import { useKeyboard } from '@/hooks/useKeyboard'
+import { tileTypeAt } from '@/game/utils/grid'
 import type { EngineStats } from '@/game/GameEngine'
 import type { Bullet, EntityId, Explosion, InputIntent, LevelDefinition, Tank } from '@/game/types'
 
@@ -141,6 +154,7 @@ export default function GameCanvas({
     explosionsRef.current = []
     mapRef.current = level.map.map((row) => [...row])
     spawnerRef.current = new SpawnManager({ queue: level.enemyQueue })
+    resetAIMemory()
     // 让 HUD 立刻感知新关卡的 queue 长度，而不是等下一次 100ms 轮询。
     onEnemiesChange?.({ field: 0, queue: level.enemyQueue.length, totalSpawned: 0 })
   }, [level, onEnemiesChange])
@@ -177,11 +191,30 @@ export default function GameCanvas({
       })
       if (spawnResult.spawned.length > 0) enemies.push(...spawnResult.spawned)
 
-      // 4) 敌军移动（T-10 用最小巡逻 AI 占位；T-11 会替换为正式 AI）
+      // 4) 敌军 AI：FSM 决策 → 移动 + 开火（T-11）
+      //    - stepEnemyAI 每 AI_DECISION_INTERVAL 秒重评一次状态，输出 { desiredDir, wantFire }
+      //    - 移动仍走 updateTank，与玩家共享同一入口，保证碰撞规则一致
+      //    - 开火受 canTankFire（冷却）+ ENEMY_MAX_BULLETS（同屏上限）双重限制
+      const isBaseAlive = tileTypeAt(map, BASE_POSITION.col, BASE_POSITION.row) === 'base'
+      const aliveEnemyIds = new Set<EntityId>()
       for (const e of enemies) {
         if (!e.alive) continue
-        stepEnemyPatrol(map, e, dt, () => rng.next())
+        aliveEnemyIds.add(e.id)
+        const intent = stepEnemyAI(map, e, dt, {
+          player: tank,
+          basePos: isBaseAlive ? BASE_POSITION : null,
+          nextRandom: () => rng.next(),
+        })
+        updateTank(map, e, dt, { forcedDir: intent.desiredDir })
+        if (intent.wantFire && canTankFire(e)) {
+          const owned = countAliveBulletsByOwner(bullets, e.id)
+          if (owned < ENEMY_MAX_BULLETS) {
+            bullets.push(createBullet(e))
+            e.cooldown = TANK_COOLDOWN.ENEMY
+          }
+        }
       }
+      pruneAIMemory(aliveEnemyIds)
 
       // 5) 推进子弹 & 命中判定；敌军作为可命中目标一起传入。
       stepBullets({
