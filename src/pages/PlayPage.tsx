@@ -1,10 +1,30 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import StageLayout from '@/layouts/StageLayout'
-import GameCanvas from '@/components/GameCanvas'
-import { PLAYER_MAX_BULLETS, TANK_COOLDOWN, TILE_SIZE } from '@/game/constants'
-import { DEFAULT_LEVEL } from '@/game/maps/levels'
+import GameCanvas, { type GameOverReason, type KillByKind } from '@/components/GameCanvas'
+import {
+  PLAYER_INITIAL_LIVES,
+  PLAYER_MAX_BULLETS,
+  SCORE_TABLE,
+  STAGE_CLEAR_DURATION,
+  STAGE_CLEAR_TICK,
+  TANK_COOLDOWN,
+  TILE_SIZE,
+} from '@/game/constants'
+import { DEFAULT_LEVEL, LEVELS } from '@/game/maps/levels'
 import type { EngineStats } from '@/game/GameEngine'
-import type { InputIntent, Tank } from '@/game/types'
+import type { InputIntent, LevelDefinition, Tank } from '@/game/types'
+
+/**
+ * PlayPage —— T-12 起把"单纯战场画布"升级成完整的一局：
+ *   playing → stage-clear（结算 + 自动切下一关）↺
+ *   playing → game-over（基地毁 or 3 命耗尽，允许 RETRY / 回菜单）
+ *
+ * 关键状态：
+ * - [phase](#L45-L45)：顶层场景阶段。切到非 'playing' 会通知 GameCanvas 冻结世界。
+ * - [levelIndex](#L46-L46)：当前关卡在 [LEVELS](file:///Users/puqingrui/workspace/Projects/TankWar/src/game/maps/levels.ts#L8-L8) 里的下标；stage-clear
+ *   后 (levelIndex + 1) % LEVELS.length 循环。
+ * - [resetKey](#L47-L47)：整局重开计数器，改变即触发 GameCanvas 清 session。
+ */
 
 const INITIAL_STATS: EngineStats = { fps: 0, ups: 0, frameMs: 0, time: 0 }
 const INITIAL_INTENT: InputIntent = { dir: null, fire: false, pausePressed: false }
@@ -25,8 +45,25 @@ const DIR_LABEL: Record<'up' | 'down' | 'left' | 'right', string> = {
   right: '→',
 }
 
+type Phase = 'playing' | 'paused' | 'stage-clear' | 'game-over'
+
+interface StageClearInfo {
+  killByKind: KillByKind
+  score: number
+  stageId: number
+}
+
+interface GameOverInfo {
+  reason: GameOverReason
+  score: number
+  stageId: number
+}
+
 export default function PlayPage() {
-  const level = DEFAULT_LEVEL
+  const [levelIndex, setLevelIndex] = useState(0)
+  const level: LevelDefinition = LEVELS[levelIndex] ?? DEFAULT_LEVEL
+  const [phase, setPhase] = useState<Phase>('playing')
+  const [resetKey, setResetKey] = useState(0)
   const [stats, setStats] = useState<EngineStats>(INITIAL_STATS)
   const [intent, setIntent] = useState<InputIntent>(INITIAL_INTENT)
   const [tank, setTank] =
@@ -41,10 +78,17 @@ export default function PlayPage() {
     queue: level.enemyQueue.length,
     totalSpawned: 0,
   })
+  const [lives, setLives] = useState(PLAYER_INITIAL_LIVES)
+  const [score, setScore] = useState(0)
+  const [stageClearInfo, setStageClearInfo] = useState<StageClearInfo | null>(null)
+  const [gameOverInfo, setGameOverInfo] = useState<GameOverInfo | null>(null)
 
   const handleStats = useCallback((s: EngineStats) => setStats(s), [])
   const handleInput = useCallback((i: InputIntent) => setIntent(i), [])
-  const handlePause = useCallback((p: boolean) => setPaused(p), [])
+  const handlePause = useCallback((p: boolean) => {
+    setPaused(p)
+    // ESC 暂停只影响 UI 提示；phase 保持 'playing'，GameCanvas 内部的 engine.pause() 已经处理停帧。
+  }, [])
   const handleTank = useCallback((t: Tank) => {
     setTank({
       x: t.x,
@@ -62,9 +106,50 @@ export default function PlayPage() {
     (info: { field: number; queue: number; totalSpawned: number }) => setEnemies(info),
     [],
   )
+  const handleScore = useCallback((s: number) => setScore(s), [])
+  const handleLives = useCallback((l: number) => setLives(l), [])
+  const handleStageCleared = useCallback((info: StageClearInfo) => {
+    setStageClearInfo(info)
+    setPhase('stage-clear')
+  }, [])
+  const handleGameOver = useCallback((info: GameOverInfo) => {
+    setGameOverInfo(info)
+    setPhase('game-over')
+  }, [])
+
+  /** stage-clear：等待 STAGE_CLEAR_DURATION 秒 → 切下一关（循环）。 */
+  useEffect(() => {
+    if (phase !== 'stage-clear') return
+    const timer = window.setTimeout(() => {
+      setLevelIndex((idx) => (idx + 1) % LEVELS.length)
+      setStageClearInfo(null)
+      setBaseDown(false)
+      setPhase('playing')
+    }, STAGE_CLEAR_DURATION * 1000)
+    return () => window.clearTimeout(timer)
+  }, [phase])
+
+  /** RETRY：整局重开 —— 回到关卡 0，session 清零，phase 归 playing。 */
+  const handleRetry = useCallback(() => {
+    setLevelIndex(0)
+    setResetKey((k) => k + 1)
+    setStageClearInfo(null)
+    setGameOverInfo(null)
+    setBaseDown(false)
+    setLives(PLAYER_INITIAL_LIVES)
+    setScore(0)
+    setPhase('playing')
+  }, [])
 
   const enemiesLeft = enemies.field + enemies.queue
-  const subtitle = baseDown ? 'BASE DESTROYED' : paused ? 'PAUSED' : `${enemiesLeft} ENEMIES LEFT`
+  const subtitle = useMemo(() => {
+    if (phase === 'game-over') return 'GAME OVER'
+    if (phase === 'stage-clear') return 'STAGE CLEAR'
+    if (baseDown) return 'BASE DESTROYED'
+    if (paused) return 'PAUSED'
+    return `${enemiesLeft} ENEMIES LEFT`
+  }, [phase, baseDown, paused, enemiesLeft])
+
   const totalEnemies = level.enemyQueue.length
   const spawnedCount = Math.min(totalEnemies, enemies.totalSpawned)
   const tankCol = Math.floor(tank.x / TILE_SIZE)
@@ -75,16 +160,29 @@ export default function PlayPage() {
   return (
     <StageLayout title={level.name} subtitle={subtitle} showBack>
       <div className="flex h-full w-full items-center gap-4">
-        <GameCanvas
-          level={level}
-          onStats={handleStats}
-          onInput={handleInput}
-          onTankChange={handleTank}
-          onPauseChange={handlePause}
-          onBulletsChange={handleBullets}
-          onEnemiesChange={handleEnemies}
-          onBaseHit={handleBaseHit}
-        />
+        <div className="relative">
+          <GameCanvas
+            level={level}
+            phase={phase}
+            resetSessionKey={resetKey}
+            onStats={handleStats}
+            onInput={handleInput}
+            onTankChange={handleTank}
+            onPauseChange={handlePause}
+            onBulletsChange={handleBullets}
+            onEnemiesChange={handleEnemies}
+            onBaseHit={handleBaseHit}
+            onScoreChange={handleScore}
+            onLivesChange={handleLives}
+            onStageCleared={handleStageCleared}
+            onGameOver={handleGameOver}
+          />
+
+          {phase === 'stage-clear' && stageClearInfo && <StageClearOverlay info={stageClearInfo} />}
+          {phase === 'game-over' && gameOverInfo && (
+            <GameOverOverlay info={gameOverInfo} onRetry={handleRetry} />
+          )}
+        </div>
 
         <aside className="flex h-canvas w-hud flex-col justify-between p-3 pixel-frame">
           <div>
@@ -112,7 +210,17 @@ export default function PlayPage() {
           <div className="mt-4">
             <p className="font-pixel text-pixel-sm text-outline">1P</p>
             <p className="font-pixel text-pixel-lg text-hud-accent">
-              {'♥'.repeat(Math.max(tank.hp, 0)) || '·'}
+              {'♥'.repeat(Math.max(lives, 0)) || '·'}
+            </p>
+            <p className="font-pixel text-pixel-sm text-white">
+              LIVES <span className="text-hud-accent">{lives}</span>
+            </p>
+          </div>
+
+          <div className="mt-4">
+            <p className="font-pixel text-pixel-sm text-outline">SCORE</p>
+            <p className="font-pixel text-pixel-2xl text-hud-accent">
+              {score.toString().padStart(6, '0')}
             </p>
           </div>
 
@@ -202,7 +310,7 @@ export default function PlayPage() {
             <p className="font-pixel text-pixel-sm text-white">
               STATE{' '}
               <span className={paused ? 'text-hud-accent' : 'text-white'}>
-                {paused ? 'PAUSE' : 'RUN'}
+                {paused ? 'PAUSE' : phase.toUpperCase()}
               </span>
             </p>
           </div>
@@ -213,5 +321,101 @@ export default function PlayPage() {
         </aside>
       </div>
     </StageLayout>
+  )
+}
+
+/**
+ * StageClearOverlay —— 关卡结算面板。
+ *
+ * 逐条统计：按 `basic → fast → power → armor` 顺序，每 [STAGE_CLEAR_TICK](file:///Users/puqingrui/workspace/Projects/TankWar/src/game/constants.ts#L233-L233)
+ * 秒揭示一行；全部揭示后显示 "TOTAL" 与关卡分数，然后 PlayPage 定时器自动切下一关。
+ */
+function StageClearOverlay({ info }: { info: StageClearInfo }) {
+  const rows = useMemo(
+    () =>
+      (['basic', 'fast', 'power', 'armor'] as const).map((kind) => ({
+        kind,
+        count: info.killByKind[kind] ?? 0,
+        unit: SCORE_TABLE[kind],
+      })),
+    [info],
+  )
+  const [revealed, setRevealed] = useState(0)
+
+  useEffect(() => {
+    setRevealed(0)
+    let i = 0
+    const id = window.setInterval(() => {
+      i += 1
+      setRevealed(i)
+      if (i >= rows.length) window.clearInterval(id)
+    }, STAGE_CLEAR_TICK * 1000)
+    return () => window.clearInterval(id)
+  }, [rows.length])
+
+  const stageTotal = rows.reduce((acc, r) => acc + r.count * r.unit, 0)
+
+  return (
+    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center bg-black/85 font-pixel text-white">
+      <p className="text-pixel-2xl text-hud-accent">
+        STAGE {info.stageId.toString().padStart(2, '0')}
+      </p>
+      <p className="mt-1 text-pixel-lg text-hud-accent animate-blink">CONGRATULATIONS!</p>
+      <div className="mt-4 flex flex-col gap-1 text-pixel-sm">
+        {rows.map((r, i) => (
+          <div key={r.kind} className="grid grid-cols-3 gap-4">
+            <span className="uppercase text-outline">{r.kind}</span>
+            <span className="text-right text-white">
+              {i < revealed ? r.count.toString().padStart(2, '0') : '--'} × {r.unit}
+            </span>
+            <span className="text-right text-hud-accent">
+              {i < revealed ? (r.count * r.unit).toString().padStart(5, '0') : '-----'}
+            </span>
+          </div>
+        ))}
+      </div>
+      <p className="mt-4 text-pixel-lg">
+        TOTAL <span className="text-hud-accent">{stageTotal.toString().padStart(6, '0')}</span>
+      </p>
+      <p className="mt-6 animate-blink text-pixel-sm text-outline">NEXT STAGE...</p>
+    </div>
+  )
+}
+
+/**
+ * GameOverOverlay —— 结束一局。
+ *
+ * 红色 GAME OVER 像素字体 + 分数 + 触发原因 + RETRY / MENU 快捷按钮。
+ * RETRY 会触发 [handleRetry](#L117-L124) 整局重开。
+ */
+function GameOverOverlay({ info, onRetry }: { info: GameOverInfo; onRetry: () => void }) {
+  const reasonLabel = info.reason === 'base-destroyed' ? 'YOUR BASE FELL' : 'ALL LIVES LOST'
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 font-pixel text-white">
+      <p className="text-pixel-2xl text-tank-enemyArmor">GAME</p>
+      <p className="text-pixel-2xl text-tank-enemyArmor">OVER</p>
+      <p className="mt-4 text-pixel-sm text-outline">{reasonLabel}</p>
+      <p className="mt-4 text-pixel-lg">
+        SCORE <span className="text-hud-accent">{info.score.toString().padStart(6, '0')}</span>
+      </p>
+      <p className="mt-1 text-pixel-sm text-outline">
+        STAGE {info.stageId.toString().padStart(2, '0')}
+      </p>
+      <div className="mt-6 flex gap-3">
+        <button
+          type="button"
+          onClick={onRetry}
+          className="border-2 border-outline px-4 py-2 font-pixel text-pixel-sm text-hud-accent hover:bg-outline/30"
+        >
+          RETRY
+        </button>
+        <a
+          href="#/"
+          className="border-2 border-outline px-4 py-2 font-pixel text-pixel-sm text-white hover:bg-outline/30"
+        >
+          MENU
+        </a>
+      </div>
+    </div>
   )
 }

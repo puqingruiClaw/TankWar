@@ -191,6 +191,47 @@ export const LEADERBOARD_STORAGE_KEY = 'tankwar_leaderboard'
 export const SETTINGS_STORAGE_KEY = 'tankwar_settings'
 export const LEADERBOARD_MAX_ENTRIES = 10
 
+// ─── 结算 / 生命 / 得分（T-12） ─────────────────────────────────────────────
+
+/**
+ * 玩家初始生命数（红白机原版 = 3）。
+ * 每关开局重置为该值？→ 否：跨关继承，只在整局重开时才重置为 3。
+ * 见 [GameCanvas](../components/GameCanvas.tsx) 里的 sessionRef.lives。
+ */
+export const PLAYER_INITIAL_LIVES = 3
+
+/**
+ * 玩家坦克重生时的出生保护时长（秒）；与 SPAWN_INVULNERABLE 分开，
+ * 因为红白机原版对玩家重生保护要比敌军出生保护略长（~2s）。
+ */
+export const PLAYER_RESPAWN_INVULNERABLE = 2
+
+/**
+ * 击杀不同类型敌军的得分表（红白机原版：100/200/300/400）。
+ * key 与 [EnemyKind](../types.ts#L55-L55) 对齐，供 [SCORE_TABLE](#L211-L216) 直接消费。
+ */
+export const SCORE_TABLE: Readonly<Record<'basic' | 'fast' | 'power' | 'armor', number>> = {
+  basic: 100,
+  fast: 200,
+  power: 300,
+  armor: 400,
+}
+
+/**
+ * 关卡终局判定：本关目标击杀数 = ENEMIES_PER_STAGE 全灭。
+ * 与 [ENEMIES_PER_STAGE](#L119-L120) 保持一致，供 GameCanvas 判定 stage-clear。
+ */
+export const STAGE_CLEAR_TARGET = ENEMIES_PER_STAGE
+
+/** 击破基地后，等待多少秒再触发 game-over 覆盖层（给爆炸动画留时间）。 */
+export const GAME_OVER_DELAY = 1.5
+
+/** 关卡通关后 stage-clear 结算页停留多少秒再自动进入下一关。 */
+export const STAGE_CLEAR_DURATION = 4
+
+/** 每个 kind 的分数动画每条累加间隔（秒），让统计逐条飘出。 */
+export const STAGE_CLEAR_TICK = 0.4
+
 // ─── 调色板（与 Tailwind theme 保持一致，供 Canvas 直接使用） ────────────────
 // 修改这里的十六进制值时，请同步更新 tailwind.config.js 中的 colors.tank / terrain。
 
