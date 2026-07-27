@@ -1,12 +1,21 @@
 import { useCallback, useState } from 'react'
 import StageLayout from '@/layouts/StageLayout'
 import GameCanvas from '@/components/GameCanvas'
+import { TILE_SIZE } from '@/game/constants'
 import { DEFAULT_LEVEL } from '@/game/maps/levels'
 import type { EngineStats } from '@/game/GameEngine'
-import type { InputIntent } from '@/game/types'
+import type { InputIntent, Tank } from '@/game/types'
 
 const INITIAL_STATS: EngineStats = { fps: 0, ups: 0, frameMs: 0, time: 0 }
 const INITIAL_INTENT: InputIntent = { dir: null, fire: false, pausePressed: false }
+const INITIAL_TANK: Pick<Tank, 'x' | 'y' | 'dir' | 'level' | 'hp' | 'invulnerable'> = {
+  x: 0,
+  y: 0,
+  dir: 'up',
+  level: 0,
+  hp: 1,
+  invulnerable: 0,
+}
 
 const DIR_LABEL: Record<'up' | 'down' | 'left' | 'right', string> = {
   up: '↑',
@@ -19,13 +28,28 @@ export default function PlayPage() {
   const level = DEFAULT_LEVEL
   const [stats, setStats] = useState<EngineStats>(INITIAL_STATS)
   const [intent, setIntent] = useState<InputIntent>(INITIAL_INTENT)
+  const [tank, setTank] =
+    useState<Pick<Tank, 'x' | 'y' | 'dir' | 'level' | 'hp' | 'invulnerable'>>(INITIAL_TANK)
   const [paused, setPaused] = useState(false)
 
   const handleStats = useCallback((s: EngineStats) => setStats(s), [])
   const handleInput = useCallback((i: InputIntent) => setIntent(i), [])
   const handlePause = useCallback((p: boolean) => setPaused(p), [])
+  const handleTank = useCallback((t: Tank) => {
+    setTank({
+      x: t.x,
+      y: t.y,
+      dir: t.dir,
+      level: t.level,
+      hp: t.hp,
+      invulnerable: t.invulnerable,
+    })
+  }, [])
 
   const subtitle = paused ? 'PAUSED' : `${level.enemyQueue.length} ENEMIES LEFT`
+  const tankCol = Math.floor(tank.x / TILE_SIZE)
+  const tankRow = Math.floor(tank.y / TILE_SIZE)
+  const shieldOn = tank.invulnerable > 0
 
   return (
     <StageLayout title={level.name} subtitle={subtitle} showBack>
@@ -34,6 +58,7 @@ export default function PlayPage() {
           level={level}
           onStats={handleStats}
           onInput={handleInput}
+          onTankChange={handleTank}
           onPauseChange={handlePause}
         />
 
@@ -49,13 +74,37 @@ export default function PlayPage() {
 
           <div className="mt-4">
             <p className="font-pixel text-pixel-sm text-outline">1P</p>
-            <p className="font-pixel text-pixel-lg text-hud-accent">♥♥♥</p>
+            <p className="font-pixel text-pixel-lg text-hud-accent">
+              {'♥'.repeat(Math.max(tank.hp, 0)) || '·'}
+            </p>
           </div>
 
           <div className="mt-4">
             <p className="font-pixel text-pixel-sm text-outline">STAGE</p>
             <p className="font-pixel text-pixel-2xl text-white">
               {level.id.toString().padStart(2, '0')}
+            </p>
+          </div>
+
+          <div className="mt-4 border-t border-outline pt-2">
+            <p className="font-pixel text-pixel-sm text-outline">TANK</p>
+            <p className="font-pixel text-pixel-sm text-white">
+              POS{' '}
+              <span className="text-hud-accent">
+                {tankCol.toString().padStart(2, '0')},{tankRow.toString().padStart(2, '0')}
+              </span>
+            </p>
+            <p className="font-pixel text-pixel-sm text-white">
+              FACE <span className="text-hud-accent">{DIR_LABEL[tank.dir]}</span>
+            </p>
+            <p className="font-pixel text-pixel-sm text-white">
+              LV <span className="text-hud-accent">{tank.level}</span>
+            </p>
+            <p className="font-pixel text-pixel-sm text-white">
+              SHIELD{' '}
+              <span className={shieldOn ? 'animate-blink text-hud-accent' : 'text-outline'}>
+                {shieldOn ? `${tank.invulnerable.toFixed(1)}s` : 'OFF'}
+              </span>
             </p>
           </div>
 

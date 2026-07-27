@@ -9,13 +9,14 @@
  * - {@link drawTerrainBelow}：绘制 brick/steel/water/ice/base（在坦克之下）。
  * - {@link drawTerrainAbove}：仅绘制 grass（在坦克之上，用于遮蔽/掩护）。
  * - {@link drawBackground}：填充黑色画布底 + 可选调试网格。
+ * - {@link drawTank}：绘制坦克实体（T-08 起接入 Tank 数据结构）。
  *
  * 分层原因：经典红白机《Battle City》的草丛会遮挡坦克，钢/砖/水/冰/base
  * 则永远在坦克之下。把 grass 抽成上层是最贴合语义、也最省状态的做法。
  */
 
 import { CANVAS_HEIGHT, CANVAS_WIDTH, PALETTE, TILE_CODE, TILE_SIZE } from '../constants'
-import type { LevelMap } from '../types'
+import type { Direction, LevelMap, Tank, TankKind } from '../types'
 
 export interface RenderSystemOptions {
   /** 调试用网格线（每 tile 一根 1px 深色线）；默认 false。 */
@@ -78,6 +79,23 @@ export class RenderSystem {
         }
       }
     }
+  }
+
+  /**
+   * 绘制单个坦克实体。
+   * - 无敌期（invulnerable > 0）以 8Hz 频率闪烁，通过 tank.invulnerable 自身衰减
+   *   的相位派生，无需外部时钟。
+   * - 车体、履带、炮管随 dir 旋转；细节格局全部用 fillRect 拼像素，无 rotate 变换，
+   *   保证 pixelated 边缘不糊。
+   */
+  drawTank(ctx: CanvasRenderingContext2D, tank: Tank): void {
+    if (!tank.alive) return
+    // 无敌闪烁：每 0.125s 切一次可见性。
+    if (tank.invulnerable > 0) {
+      const phase = Math.floor(tank.invulnerable * 8) % 2
+      if (phase === 1) return
+    }
+    drawTankSprite(ctx, tank.x, tank.y, tank.dir, tank.kind)
   }
 
   private drawGridLines(ctx: CanvasRenderingContext2D): void {
@@ -167,4 +185,71 @@ function drawBase(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.fillRect(cx - 2, cy - 4, 4, 6)
   ctx.fillRect(cx - 4, cy + 4, 2, 4)
   ctx.fillRect(cx + 2, cy + 4, 2, 4)
+}
+
+// ─── 坦克绘制单元 ────────────────────────────────────────────────────────────
+// 32×32 tile：4px 履带 × 2（左右两侧）+ 22px 主车体 + 8px 炮管。
+// dir 决定履带方位与炮管指向；kind 决定色调（后续接敌军种类）。
+
+function tankPalette(kind: TankKind): { body: string; track: string; barrel: string } {
+  const p = PALETTE.tank
+  switch (kind) {
+    case 'player':
+      return { body: p.player, track: '#7a7a1a', barrel: '#ffffff' }
+    case 'basic':
+      return { body: p.basic, track: '#5c5c5c', barrel: '#000000' }
+    case 'fast':
+      return { body: p.fast, track: '#7a5a10', barrel: '#000000' }
+    case 'power':
+      return { body: p.power, track: '#3d3d3d', barrel: '#000000' }
+    case 'armor':
+      return { body: p.armor, track: '#5b2857', barrel: '#000000' }
+  }
+}
+
+function drawTankSprite(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  dir: Direction,
+  kind: TankKind,
+): void {
+  const colors = tankPalette(kind)
+  const S = TILE_SIZE
+
+  // 履带：贴左右（垂直行进）或上下（水平行进）边缘。
+  ctx.fillStyle = colors.track
+  if (dir === 'up' || dir === 'down') {
+    ctx.fillRect(x + 2, y + 4, 4, S - 8)
+    ctx.fillRect(x + S - 6, y + 4, 4, S - 8)
+  } else {
+    ctx.fillRect(x + 4, y + 2, S - 8, 4)
+    ctx.fillRect(x + 4, y + S - 6, S - 8, 4)
+  }
+
+  // 主车体：略缩边，让履带露出。
+  ctx.fillStyle = colors.body
+  ctx.fillRect(x + 6, y + 6, S - 12, S - 12)
+
+  // 车顶炮塔：一个 8×8 小方块居中。
+  ctx.fillRect(x + S / 2 - 4, y + S / 2 - 4, 8, 8)
+
+  // 炮管：从中心伸向 dir。
+  ctx.fillStyle = colors.barrel
+  const cx = x + S / 2
+  const cy = y + S / 2
+  switch (dir) {
+    case 'up':
+      ctx.fillRect(cx - 2, y + 2, 4, S / 2 - 2)
+      break
+    case 'down':
+      ctx.fillRect(cx - 2, cy, 4, S / 2 - 2)
+      break
+    case 'left':
+      ctx.fillRect(x + 2, cy - 2, S / 2 - 2, 4)
+      break
+    case 'right':
+      ctx.fillRect(cx, cy - 2, S / 2 - 2, 4)
+      break
+  }
 }
