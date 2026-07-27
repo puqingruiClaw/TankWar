@@ -163,6 +163,28 @@ export const DEFAULT_KEYMAP = {
   pause: 'Escape',
 } as const
 
+export const ALT_KEYMAP = {
+  up: 'KeyW',
+  down: 'KeyS',
+  left: 'KeyA',
+  right: 'KeyD',
+  fire: 'Space',
+  pause: 'Escape',
+} as const
+
+export const INPUT_GAME_KEYS: readonly string[] = [
+  'ArrowUp',
+  'ArrowDown',
+  'ArrowLeft',
+  'ArrowRight',
+  'KeyW',
+  'KeyA',
+  'KeyS',
+  'KeyD',
+  'Space',
+  'Escape',
+]
+
 // ─── 存档 / 排行榜 ──────────────────────────────────────────────────────────
 
 export const LEADERBOARD_STORAGE_KEY = 'tankwar_leaderboard'

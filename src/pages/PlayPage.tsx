@@ -2,20 +2,32 @@ import { useCallback, useState } from 'react'
 import StageLayout from '@/layouts/StageLayout'
 import GameCanvas from '@/components/GameCanvas'
 import type { EngineStats } from '@/game/GameEngine'
+import type { InputIntent } from '@/game/types'
 
 const INITIAL_STATS: EngineStats = { fps: 0, ups: 0, frameMs: 0, time: 0 }
+const INITIAL_INTENT: InputIntent = { dir: null, fire: false, pausePressed: false }
+
+const DIR_LABEL: Record<'up' | 'down' | 'left' | 'right', string> = {
+  up: '↑',
+  down: '↓',
+  left: '←',
+  right: '→',
+}
 
 export default function PlayPage() {
   const [stats, setStats] = useState<EngineStats>(INITIAL_STATS)
+  const [intent, setIntent] = useState<InputIntent>(INITIAL_INTENT)
+  const [paused, setPaused] = useState(false)
+
   const handleStats = useCallback((s: EngineStats) => setStats(s), [])
+  const handleInput = useCallback((i: InputIntent) => setIntent(i), [])
+  const handlePause = useCallback((p: boolean) => setPaused(p), [])
 
   return (
-    <StageLayout title="STAGE 01" subtitle="20 ENEMIES LEFT" showBack>
+    <StageLayout title="STAGE 01" subtitle={paused ? 'PAUSED' : '20 ENEMIES LEFT'} showBack>
       <div className="flex h-full w-full items-center gap-4">
-        {/* Battle canvas — 416x416 (13 tiles × 32px), driven by GameEngine (T-05) */}
-        <GameCanvas onStats={handleStats} />
+        <GameCanvas onStats={handleStats} onInput={handleInput} onPauseChange={handlePause} />
 
-        {/* HUD sidebar — 224px wide, per PRD 4.2 */}
         <aside className="flex h-canvas w-hud flex-col justify-between p-3 pixel-frame">
           <div>
             <p className="font-pixel text-pixel-sm text-outline">ENEMIES</p>
@@ -36,7 +48,6 @@ export default function PlayPage() {
             <p className="font-pixel text-pixel-2xl text-white">01</p>
           </div>
 
-          {/* Engine diagnostics — T-05 verification */}
           <div className="mt-4 border-t border-outline pt-2">
             <p className="font-pixel text-pixel-sm text-outline">ENGINE</p>
             <p className="font-pixel text-pixel-sm text-white">
@@ -53,7 +64,26 @@ export default function PlayPage() {
             </p>
           </div>
 
-          <p className="mt-2 animate-blink font-pixel text-pixel-sm text-hud-accent">READY?</p>
+          <div className="mt-2 border-t border-outline pt-2">
+            <p className="font-pixel text-pixel-sm text-outline">INPUT</p>
+            <p className="font-pixel text-pixel-sm text-white">
+              DIR{' '}
+              <span className="text-hud-accent">{intent.dir ? DIR_LABEL[intent.dir] : '·'}</span>
+            </p>
+            <p className="font-pixel text-pixel-sm text-white">
+              FIRE <span className="text-hud-accent">{intent.fire ? 'ON' : '··'}</span>
+            </p>
+            <p className="font-pixel text-pixel-sm text-white">
+              STATE{' '}
+              <span className={paused ? 'text-hud-accent' : 'text-white'}>
+                {paused ? 'PAUSE' : 'RUN'}
+              </span>
+            </p>
+          </div>
+
+          <p className="mt-2 animate-blink font-pixel text-pixel-sm text-hud-accent">
+            {paused ? 'ESC=RESUME' : 'ESC=PAUSE'}
+          </p>
         </aside>
       </div>
     </StageLayout>

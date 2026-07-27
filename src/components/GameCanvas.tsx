@@ -1,78 +1,100 @@
 /**
  * GameCanvas —— React 侧的画布外壳。
  *
- * 本组件目前只做两件事：
- * 1. 提供一个尺寸 = CANVAS_WIDTH × CANVAS_HEIGHT 的 `<canvas>`。
- * 2. 通过 {@link useGameLoop} 挂载 GameEngine 主循环，并绑定演示级
- *    update/render 回调，用于肉眼验证 60 FPS 与 dt 稳定。
+ * T-06 起接入 InputSystem：把演示方块的自动巡逻替换为「方向键 / WASD 驱动」，
+ * 空格触发一枚 8px 白色像素粒子沿当前朝向飞出（生命周期 0.35s，仅用于视觉
+ * 验证 fire edge）。Esc 切换引擎 pause/resume，验证 InputSystem 的 pauseEdge。
  *
- * T-06 起会由父组件通过 props 注入真正的 System 组合，届时演示回调删除。
+ * 真正的坦克、子弹、碰撞由后续 T-07 及以后的 System 接管；本组件预留了
+ * `disableDemo`，届时父组件通过 props 注入替代 update/render 即可。
  */
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, PALETTE, TANK_SPEED, TILE_SIZE } from '@/game/constants'
 import { useGameLoop } from '@/hooks/useGameLoop'
+import { useKeyboard } from '@/hooks/useKeyboard'
 import type { EngineStats } from '@/game/GameEngine'
+import type { Direction, InputIntent } from '@/game/types'
 
 interface GameCanvasProps {
-  /** 当引擎每秒结算 stats 时回调，供父组件展示 HUD。*/
   onStats?: (stats: EngineStats) => void
-  /** 关闭调试演示（默认开启：显示一个沿边框绕圈的黄色方块）。*/
+  onInput?: (intent: InputIntent) => void
+  onPauseChange?: (paused: boolean) => void
   disableDemo?: boolean
   className?: string
 }
 
-/** 演示状态：一个 32×32 的黄色方块沿画布内边框顺时针巡逻。*/
+interface Particle {
+  x: number
+  y: number
+  vx: number
+  vy: number
+  life: number
+}
+
 interface DemoState {
   x: number
   y: number
-  dir: 0 | 1 | 2 | 3
+  facing: Direction
+  particles: Particle[]
 }
 
-function stepDemo(state: DemoState, dt: number): void {
+const PARTICLE_LIFE = 0.35
+const PARTICLE_SPEED = 220
+const PARTICLE_SIZE = 6
+
+const DIR_VECTORS: Record<Direction, { x: number; y: number }> = {
+  up: { x: 0, y: -1 },
+  down: { x: 0, y: 1 },
+  left: { x: -1, y: 0 },
+  right: { x: 1, y: 0 },
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return v < lo ? lo : v > hi ? hi : v
+}
+
+function stepDemo(state: DemoState, intent: InputIntent, dt: number): void {
   const speed = TANK_SPEED.PLAYER
-  const minX = 0
-  const minY = 0
   const maxX = CANVAS_WIDTH - TILE_SIZE
   const maxY = CANVAS_HEIGHT - TILE_SIZE
-  switch (state.dir) {
-    case 0: // right
-      state.x += speed * dt
-      if (state.x >= maxX) {
-        state.x = maxX
-        state.dir = 1
-      }
-      break
-    case 1: // down
-      state.y += speed * dt
-      if (state.y >= maxY) {
-        state.y = maxY
-        state.dir = 2
-      }
-      break
-    case 2: // left
-      state.x -= speed * dt
-      if (state.x <= minX) {
-        state.x = minX
-        state.dir = 3
-      }
-      break
-    case 3: // up
-      state.y -= speed * dt
-      if (state.y <= minY) {
-        state.y = minY
-        state.dir = 0
-      }
-      break
+
+  if (intent.dir) {
+    state.facing = intent.dir
+    const v = DIR_VECTORS[intent.dir]
+    state.x = clamp(state.x + v.x * speed * dt, 0, maxX)
+    state.y = clamp(state.y + v.y * speed * dt, 0, maxY)
+  }
+
+  for (let i = state.particles.length - 1; i >= 0; i--) {
+    const p = state.particles[i]
+    p.life -= dt
+    if (p.life <= 0) {
+      state.particles.splice(i, 1)
+      continue
+    }
+    p.x += p.vx * dt
+    p.y += p.vy * dt
   }
 }
 
-function drawDemo(ctx: CanvasRenderingContext2D, state: DemoState): void {
-  // 背景
+function spawnParticle(state: DemoState): void {
+  const v = DIR_VECTORS[state.facing]
+  const originX = state.x + TILE_SIZE / 2 - PARTICLE_SIZE / 2 + v.x * (TILE_SIZE / 2)
+  const originY = state.y + TILE_SIZE / 2 - PARTICLE_SIZE / 2 + v.y * (TILE_SIZE / 2)
+  state.particles.push({
+    x: originX,
+    y: originY,
+    vx: v.x * PARTICLE_SPEED,
+    vy: v.y * PARTICLE_SPEED,
+    life: PARTICLE_LIFE,
+  })
+}
+
+function drawDemo(ctx: CanvasRenderingContext2D, state: DemoState, paused: boolean): void {
   ctx.fillStyle = PALETTE.stage
   ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
 
-  // 网格辅助线（每 32 px 一根，颜色极暗，便于视觉确认单位）
   ctx.strokeStyle = '#1a1a1a'
   ctx.lineWidth = 1
   for (let x = TILE_SIZE; x < CANVAS_WIDTH; x += TILE_SIZE) {
@@ -88,39 +110,93 @@ function drawDemo(ctx: CanvasRenderingContext2D, state: DemoState): void {
     ctx.stroke()
   }
 
-  // 演示方块（模拟玩家坦克）
   ctx.fillStyle = PALETTE.tank.player
   ctx.fillRect(state.x, state.y, TILE_SIZE, TILE_SIZE)
-
-  // 描边突显像素感
   ctx.strokeStyle = '#000000'
   ctx.lineWidth = 2
   ctx.strokeRect(state.x + 1, state.y + 1, TILE_SIZE - 2, TILE_SIZE - 2)
+
+  const v = DIR_VECTORS[state.facing]
+  const cx = state.x + TILE_SIZE / 2
+  const cy = state.y + TILE_SIZE / 2
+  ctx.fillStyle = '#000000'
+  ctx.fillRect(cx + v.x * 10 - 3, cy + v.y * 10 - 3, 6, 6)
+
+  ctx.fillStyle = PALETTE.bullet
+  for (const p of state.particles) {
+    ctx.fillRect(Math.round(p.x), Math.round(p.y), PARTICLE_SIZE, PARTICLE_SIZE)
+  }
+
+  if (paused) {
+    ctx.fillStyle = 'rgba(0,0,0,0.55)'
+    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
+    ctx.fillStyle = '#e6e62e'
+    ctx.font = '24px "Press Start 2P", monospace'
+    ctx.textAlign = 'center'
+    ctx.textBaseline = 'middle'
+    ctx.fillText('PAUSE', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2)
+  }
 }
 
-export default function GameCanvas({ onStats, disableDemo = false, className }: GameCanvasProps) {
+export default function GameCanvas({
+  onStats,
+  onInput,
+  onPauseChange,
+  disableDemo = false,
+  className,
+}: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
-  // 演示状态放 ref，避免每帧触发 React 重渲染。
-  const demoRef = useRef<DemoState>({ x: 0, y: 0, dir: 0 })
+  const input = useKeyboard()
+  const demoRef = useRef<DemoState>({
+    x: CANVAS_WIDTH / 2 - TILE_SIZE / 2,
+    y: CANVAS_HEIGHT / 2 - TILE_SIZE / 2,
+    facing: 'up',
+    particles: [],
+  })
+  const [paused, setPaused] = useState(false)
+  const lastIntentRef = useRef<InputIntent>({ dir: null, fire: false, pausePressed: false })
 
-  const { stats } = useGameLoop(canvasRef, {
+  const { engine, stats } = useGameLoop(canvasRef, {
     onUpdate: (dt) => {
-      if (!disableDemo) stepDemo(demoRef.current, dt)
+      const intent = input.getIntent()
+      const fireEdge = input.consumeFireEdge()
+
+      if (!disableDemo) {
+        if (fireEdge) spawnParticle(demoRef.current)
+        stepDemo(demoRef.current, intent, dt)
+      }
+
+      lastIntentRef.current = intent
     },
     onRender: (ctx) => {
+      // pause 边沿在 render 路径处理：即使 engine 被 pause，render 仍会执行，
+      // 才能保证 Esc 既能暂停也能恢复。
+      if (input.consumePauseEdge()) {
+        if (engine.isPaused()) engine.resume()
+        else engine.pause()
+        const next = engine.isPaused()
+        setPaused(next)
+        onPauseChange?.(next)
+      }
+
       if (disableDemo) {
         ctx.fillStyle = PALETTE.stage
         ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
         return
       }
-      drawDemo(ctx, demoRef.current)
+      drawDemo(ctx, demoRef.current, engine.isPaused())
     },
   })
 
-  // 每次 stats 变化透传给父组件（每秒 1 次，无性能压力）
   useEffect(() => {
     onStats?.(stats)
   }, [stats, onStats])
+
+  useEffect(() => {
+    if (!onInput) return
+    const id = window.setInterval(() => onInput(lastIntentRef.current), 100)
+    return () => window.clearInterval(id)
+  }, [onInput])
 
   return (
     <canvas
@@ -130,6 +206,7 @@ export default function GameCanvas({ onStats, disableDemo = false, className }: 
       className={'pixelated block border-2 border-outline bg-black ' + (className ?? '')}
       style={{ width: CANVAS_WIDTH, height: CANVAS_HEIGHT }}
       aria-label="Battle canvas"
+      data-paused={paused}
     />
   )
 }
