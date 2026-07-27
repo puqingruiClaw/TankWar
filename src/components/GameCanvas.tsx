@@ -1,26 +1,34 @@
 /**
  * GameCanvas —— React 侧的画布外壳。
  *
- * T-06 起接入 InputSystem：把演示方块的自动巡逻替换为「方向键 / WASD 驱动」，
- * 空格触发一枚 8px 白色像素粒子沿当前朝向飞出（生命周期 0.35s，仅用于视觉
- * 验证 fire edge）。Esc 切换引擎 pause/resume，验证 InputSystem 的 pauseEdge。
+ * T-07 起挂载 RenderSystem 并渲染 STAGE 01 关卡地形：底层砖/钢/水/冰/base
+ * → 玩家演示方块（键盘驱动）+ 空格粒子 → 上层 grass（覆盖玩家实现「隐蔽」
+ * 效果）。真正的坦克、子弹、碰撞在 T-08+ 接入，届时替换 update/render 回调。
+ * 通过 `disableDemo` 可以关掉演示层，仅保留地形。
  *
- * 真正的坦克、子弹、碰撞由后续 T-07 及以后的 System 接管；本组件预留了
- * `disableDemo`，届时父组件通过 props 注入替代 update/render 即可。
+ * 输入：↑↓←→ / WASD 移动，Space 开火（视觉粒子），Esc 切 pause/resume。
+ * 交由 InputSystem（T-06）解析，本组件只消费 `intent` 与 edge 通道。
  */
 
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CANVAS_HEIGHT, CANVAS_WIDTH, PALETTE, TANK_SPEED, TILE_SIZE } from '@/game/constants'
+import { DEFAULT_LEVEL } from '@/game/maps/levels'
+import { RenderSystem } from '@/game/systems/RenderSystem'
 import { useGameLoop } from '@/hooks/useGameLoop'
 import { useKeyboard } from '@/hooks/useKeyboard'
 import type { EngineStats } from '@/game/GameEngine'
-import type { Direction, InputIntent } from '@/game/types'
+import type { Direction, InputIntent, LevelDefinition } from '@/game/types'
 
 interface GameCanvasProps {
   onStats?: (stats: EngineStats) => void
   onInput?: (intent: InputIntent) => void
   onPauseChange?: (paused: boolean) => void
+  /** 关卡定义；默认使用 STAGE 01（T-07 内置首关）。 */
+  level?: LevelDefinition
+  /** 关闭玩家演示方块，仅渲染地形；默认 false。 */
   disableDemo?: boolean
+  /** 显示 tile 网格线（调试用）；默认 false。 */
+  showGrid?: boolean
   className?: string
 }
 
@@ -49,6 +57,9 @@ const DIR_VECTORS: Record<Direction, { x: number; y: number }> = {
   left: { x: -1, y: 0 },
   right: { x: 1, y: 0 },
 }
+
+/** 经典 BC 1P 出生点：底行左三分之一。 */
+const PLAYER_SPAWN = { col: 4, row: 12 }
 
 function clamp(v: number, lo: number, hi: number): number {
   return v < lo ? lo : v > hi ? hi : v
@@ -91,25 +102,7 @@ function spawnParticle(state: DemoState): void {
   })
 }
 
-function drawDemo(ctx: CanvasRenderingContext2D, state: DemoState, paused: boolean): void {
-  ctx.fillStyle = PALETTE.stage
-  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
-
-  ctx.strokeStyle = '#1a1a1a'
-  ctx.lineWidth = 1
-  for (let x = TILE_SIZE; x < CANVAS_WIDTH; x += TILE_SIZE) {
-    ctx.beginPath()
-    ctx.moveTo(x + 0.5, 0)
-    ctx.lineTo(x + 0.5, CANVAS_HEIGHT)
-    ctx.stroke()
-  }
-  for (let y = TILE_SIZE; y < CANVAS_HEIGHT; y += TILE_SIZE) {
-    ctx.beginPath()
-    ctx.moveTo(0, y + 0.5)
-    ctx.lineTo(CANVAS_WIDTH, y + 0.5)
-    ctx.stroke()
-  }
-
+function drawTank(ctx: CanvasRenderingContext2D, state: DemoState): void {
   ctx.fillStyle = PALETTE.tank.player
   ctx.fillRect(state.x, state.y, TILE_SIZE, TILE_SIZE)
   ctx.strokeStyle = '#000000'
@@ -121,35 +114,40 @@ function drawDemo(ctx: CanvasRenderingContext2D, state: DemoState, paused: boole
   const cy = state.y + TILE_SIZE / 2
   ctx.fillStyle = '#000000'
   ctx.fillRect(cx + v.x * 10 - 3, cy + v.y * 10 - 3, 6, 6)
+}
 
+function drawParticles(ctx: CanvasRenderingContext2D, state: DemoState): void {
   ctx.fillStyle = PALETTE.bullet
   for (const p of state.particles) {
     ctx.fillRect(Math.round(p.x), Math.round(p.y), PARTICLE_SIZE, PARTICLE_SIZE)
   }
+}
 
-  if (paused) {
-    ctx.fillStyle = 'rgba(0,0,0,0.55)'
-    ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
-    ctx.fillStyle = '#e6e62e'
-    ctx.font = '24px "Press Start 2P", monospace'
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'middle'
-    ctx.fillText('PAUSE', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2)
-  }
+function drawPauseOverlay(ctx: CanvasRenderingContext2D): void {
+  ctx.fillStyle = 'rgba(0,0,0,0.55)'
+  ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
+  ctx.fillStyle = '#e6e62e'
+  ctx.font = '24px "Press Start 2P", monospace'
+  ctx.textAlign = 'center'
+  ctx.textBaseline = 'middle'
+  ctx.fillText('PAUSE', CANVAS_WIDTH / 2, CANVAS_HEIGHT / 2)
 }
 
 export default function GameCanvas({
   onStats,
   onInput,
   onPauseChange,
+  level = DEFAULT_LEVEL,
   disableDemo = false,
+  showGrid = false,
   className,
 }: GameCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const input = useKeyboard()
+  const renderSystem = useMemo(() => new RenderSystem({ showGrid }), [showGrid])
   const demoRef = useRef<DemoState>({
-    x: CANVAS_WIDTH / 2 - TILE_SIZE / 2,
-    y: CANVAS_HEIGHT / 2 - TILE_SIZE / 2,
+    x: PLAYER_SPAWN.col * TILE_SIZE,
+    y: PLAYER_SPAWN.row * TILE_SIZE,
     facing: 'up',
     particles: [],
   })
@@ -179,12 +177,20 @@ export default function GameCanvas({
         onPauseChange?.(next)
       }
 
-      if (disableDemo) {
-        ctx.fillStyle = PALETTE.stage
-        ctx.fillRect(0, 0, CANVAS_WIDTH, CANVAS_HEIGHT)
-        return
+      // Layer 1: 底 + 静态地形（brick/steel/water/ice/base）
+      renderSystem.drawBackground(ctx)
+      renderSystem.drawTerrainBelow(ctx, level.map)
+
+      // Layer 2: 玩家演示方块与子弹粒子
+      if (!disableDemo) {
+        drawTank(ctx, demoRef.current)
+        drawParticles(ctx, demoRef.current)
       }
-      drawDemo(ctx, demoRef.current, engine.isPaused())
+
+      // Layer 3: grass（在坦克之上，实现红白机原版「草丛遮蔽」效果）
+      renderSystem.drawTerrainAbove(ctx, level.map)
+
+      if (engine.isPaused()) drawPauseOverlay(ctx)
     },
   })
 

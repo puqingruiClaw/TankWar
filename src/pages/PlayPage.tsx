@@ -1,6 +1,7 @@
 import { useCallback, useState } from 'react'
 import StageLayout from '@/layouts/StageLayout'
 import GameCanvas from '@/components/GameCanvas'
+import { DEFAULT_LEVEL } from '@/game/maps/levels'
 import type { EngineStats } from '@/game/GameEngine'
 import type { InputIntent } from '@/game/types'
 
@@ -15,6 +16,7 @@ const DIR_LABEL: Record<'up' | 'down' | 'left' | 'right', string> = {
 }
 
 export default function PlayPage() {
+  const level = DEFAULT_LEVEL
   const [stats, setStats] = useState<EngineStats>(INITIAL_STATS)
   const [intent, setIntent] = useState<InputIntent>(INITIAL_INTENT)
   const [paused, setPaused] = useState(false)
@@ -23,16 +25,23 @@ export default function PlayPage() {
   const handleInput = useCallback((i: InputIntent) => setIntent(i), [])
   const handlePause = useCallback((p: boolean) => setPaused(p), [])
 
+  const subtitle = paused ? 'PAUSED' : `${level.enemyQueue.length} ENEMIES LEFT`
+
   return (
-    <StageLayout title="STAGE 01" subtitle={paused ? 'PAUSED' : '20 ENEMIES LEFT'} showBack>
+    <StageLayout title={level.name} subtitle={subtitle} showBack>
       <div className="flex h-full w-full items-center gap-4">
-        <GameCanvas onStats={handleStats} onInput={handleInput} onPauseChange={handlePause} />
+        <GameCanvas
+          level={level}
+          onStats={handleStats}
+          onInput={handleInput}
+          onPauseChange={handlePause}
+        />
 
         <aside className="flex h-canvas w-hud flex-col justify-between p-3 pixel-frame">
           <div>
             <p className="font-pixel text-pixel-sm text-outline">ENEMIES</p>
             <div className="mt-2 grid grid-cols-4 gap-1">
-              {Array.from({ length: 20 }).map((_, i) => (
+              {Array.from({ length: level.enemyQueue.length }).map((_, i) => (
                 <div key={i} className="h-3 w-3 bg-tank-enemyBasic" aria-hidden />
               ))}
             </div>
@@ -45,7 +54,9 @@ export default function PlayPage() {
 
           <div className="mt-4">
             <p className="font-pixel text-pixel-sm text-outline">STAGE</p>
-            <p className="font-pixel text-pixel-2xl text-white">01</p>
+            <p className="font-pixel text-pixel-2xl text-white">
+              {level.id.toString().padStart(2, '0')}
+            </p>
           </div>
 
           <div className="mt-4 border-t border-outline pt-2">
