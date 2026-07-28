@@ -1,29 +1,29 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { load as loadLeaderboard } from '@/lib/leaderboard'
+import { useAudioSettings, usePlaySfx } from '@/hooks/useAudio'
 
 /**
  * MenuPage —— T-18：把最初的"三行菜单原型"升级成完整 FC 街机风开始菜单。
  *
- * 结构（自上而下）：
- *   ┌─ HUD 顶栏：I-PLAYER 与 HI-SCORE，两列等宽 —— 复刻《Battle City》标题画面。
- *   ├─ 大号 LOGO：BATTLE / CITY 双色像素字 + 右侧 500ms 闪烁的像素小坦克 (inline SVG)。
- *   ├─ 主菜单：4 项，键盘 ↑/↓/W/S 选择，Enter/Space 确认。
- *   │           选中项以 ► 闪烁光标提示（.pixel-cursor + .pixel-cursor--blink）。
- *   │           STAGE SELECT 属"占位入口"—— 视觉出现但被禁用，避免超前实现 T-15+ 的选关流程。
- *   └─ 底部 footer：操作提示 + 版权行；"— PRESS ENTER —" 继续沿用 animate-blink。
- *
- * 无新增第三方依赖、无新资源、无破坏 route/store 的约定，纯 DOM 层升级。
+ * T-22 追加：
+ * - 菜单光标移动/确认时播报 [menu-move / menu-confirm](../game/systems/AudioSystem.ts)，
+ *   给"键盘唯一交互"以最起码的听觉反馈；
+ * - 新增 SOUND ON/OFF 菜单项，与全局 [useAudioSettings](../hooks/useAudio.ts#L74-L104)
+ *   联动；实际的持久化与 M 键全局静音在 [App.GlobalAudio](../App.tsx) 里完成。
  */
 
 interface MenuItem {
   label: string
-  to: string
+  /** 跳转项：Enter 时 navigate(to)。 */
+  to?: string
+  /** 动作项：Enter 时执行 action()。to / action 二选一。 */
+  action?: () => void
   disabled?: boolean
   hint?: string
 }
 
-const MENU_ITEMS: readonly MenuItem[] = [
+const STATIC_MENU: readonly MenuItem[] = [
   { label: '1 PLAYER', to: '/play' },
   { label: 'STAGE SELECT', to: '/play', disabled: true, hint: 'COMING SOON' },
   { label: 'LEADERBOARD', to: '/leaderboard' },
@@ -54,8 +54,20 @@ function useHiScore(): number {
 export default function MenuPage() {
   const navigate = useNavigate()
   const hiScore = useHiScore()
+  const { muted, toggleMuted } = useAudioSettings()
+  const playSfx = usePlaySfx()
 
-  const firstEnabled = MENU_ITEMS.findIndex((m) => !m.disabled)
+  // 用 useMemo 因为 SOUND 项依赖 muted state。跳过 memo 依赖分析，语义等价于
+  // 每次 render 直接构造数组——4~5 项的开销可以忽略。
+  const menuItems: readonly MenuItem[] = [
+    ...STATIC_MENU,
+    {
+      label: `SOUND: ${muted ? 'OFF' : 'ON'}`,
+      action: () => toggleMuted(),
+    },
+  ]
+
+  const firstEnabled = menuItems.findIndex((m) => !m.disabled)
   const [index, setIndex] = useState(firstEnabled === -1 ? 0 : firstEnabled)
 
   /**
@@ -63,10 +75,10 @@ export default function MenuPage() {
    * 传入方向 +1（下）或 -1（上），返回下一个 enabled index；若全 disabled 则返回原值。
    */
   const stepIndex = (from: number, delta: 1 | -1): number => {
-    const n = MENU_ITEMS.length
+    const n = menuItems.length
     for (let step = 1; step <= n; step++) {
       const next = (from + delta * step + n * step) % n
-      if (!MENU_ITEMS[next].disabled) return next
+      if (!menuItems[next].disabled) return next
     }
     return from
   }
@@ -78,25 +90,39 @@ export default function MenuPage() {
         case 'w':
         case 'W':
           e.preventDefault()
-          setIndex((i) => stepIndex(i, -1))
+          setIndex((i) => {
+            const next = stepIndex(i, -1)
+            if (next !== i) playSfx('menu-move')
+            return next
+          })
           break
         case 'ArrowDown':
         case 's':
         case 'S':
           e.preventDefault()
-          setIndex((i) => stepIndex(i, 1))
+          setIndex((i) => {
+            const next = stepIndex(i, 1)
+            if (next !== i) playSfx('menu-move')
+            return next
+          })
           break
         case 'Enter':
         case ' ': {
           e.preventDefault()
-          const item = MENU_ITEMS[index]
-          if (!item.disabled) navigate(item.to)
+          const item = menuItems[index]
+          if (item.disabled) break
+          playSfx('menu-confirm')
+          if (item.action) item.action()
+          else if (item.to) navigate(item.to)
           break
         }
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
+    // menuItems 每次 render 都会重建，但引用变化不影响 handler 行为（handler
+    // 每帧读最新的闭包）——故意省略 menuItems / playSfx 的依赖以复用 handler。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [index, navigate])
 
   return (
@@ -130,7 +156,7 @@ export default function MenuPage() {
           aria-label="Main menu"
         >
           <ul className="flex flex-col gap-3" role="menu">
-            {MENU_ITEMS.map((item, i) => {
+            {menuItems.map((item, i) => {
               const active = i === index
               const disabled = !!item.disabled
               return (
@@ -150,8 +176,17 @@ export default function MenuPage() {
                     aria-current={active ? 'true' : undefined}
                     aria-disabled={disabled || undefined}
                     disabled={disabled}
-                    onClick={() => !disabled && navigate(item.to)}
-                    onMouseEnter={() => !disabled && setIndex(i)}
+                    onClick={() => {
+                      if (disabled) return
+                      playSfx('menu-confirm')
+                      if (item.action) item.action()
+                      else if (item.to) navigate(item.to)
+                    }}
+                    onMouseEnter={() => {
+                      if (disabled || i === index) return
+                      playSfx('menu-move')
+                      setIndex(i)
+                    }}
                     className={
                       'bg-transparent p-0 font-pixel text-pixel-lg text-inherit ' +
                       (disabled ? 'cursor-not-allowed' : '')
@@ -174,7 +209,8 @@ export default function MenuPage() {
         <footer className="mt-auto text-center font-pixel text-pixel-sm text-outline">
           <p>
             <span className="text-hud-accent">↑↓</span> SELECT ·{' '}
-            <span className="text-hud-accent">ENTER</span> CONFIRM
+            <span className="text-hud-accent">ENTER</span> CONFIRM ·{' '}
+            <span className="text-hud-accent">M</span> MUTE
           </p>
           <p className="mt-2 animate-blink text-white">— PRESS ENTER —</p>
           <p className="mt-3 text-pixel-xs text-muted">

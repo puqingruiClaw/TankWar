@@ -68,6 +68,7 @@ import {
 import type { PowerUpSessionState } from '@/game/systems/PowerUpSystem'
 import { RenderSystem } from '@/game/systems/RenderSystem'
 import { SpawnManager, countAliveEnemies, pruneDeadEnemies } from '@/game/systems/SpawnManager'
+import { audio } from '@/game/systems/AudioSystem'
 import { createRng } from '@/game/utils/rng'
 import { useGameLoop } from '@/hooks/useGameLoop'
 import { useKeyboard } from '@/hooks/useKeyboard'
@@ -435,6 +436,7 @@ export default function GameCanvas({
         if (owned < PLAYER_MAX_BULLETS) {
           bullets.push(createBullet(tank))
           tank.cooldown = TANK_COOLDOWN.PLAYER
+          audio.play('player-fire')
         }
       }
 
@@ -481,6 +483,7 @@ export default function GameCanvas({
           if (owned < ENEMY_MAX_BULLETS) {
             bullets.push(createBullet(e))
             e.cooldown = TANK_COOLDOWN.ENEMY
+            audio.play('enemy-fire')
           }
         }
       }
@@ -502,8 +505,10 @@ export default function GameCanvas({
         tanks: refreshScratchTanks(enemies, tank),
         dt,
         events: {
-          onExplosion: (x, y, kind) =>
-            spawnExplosion(explosions, () => ++localExplosionId, x, y, kind),
+          onExplosion: (x, y, kind) => {
+            spawnExplosion(explosions, () => ++localExplosionId, x, y, kind)
+            audio.play(kind === 'tank' ? 'explosion-tank' : 'explosion-bullet')
+          },
           onBaseHit: () => {
             callbacksRef.current.onBaseHit?.()
             // 基地爆破：延迟 GAME_OVER_DELAY 秒发 game-over，让爆炸有时间演出。
@@ -531,6 +536,7 @@ export default function GameCanvas({
               if (cell) {
                 const kindDropped = pickPowerUpKind(rng)
                 powerUps.push(createPowerUp(kindDropped, cell.col, cell.row))
+                audio.play('powerup-appear')
                 // 只 spawn 一次，防止同一格连续中签导致重复掉落。
                 session.bonusEnemyIndices.delete(spawnIdx)
               }
@@ -539,6 +545,7 @@ export default function GameCanvas({
           onPlayerKilled: () => {
             session.lives = Math.max(0, session.lives - 1)
             callbacksRef.current.onLivesChange?.(session.lives)
+            audio.play('life-lost')
             if (session.lives > 0) {
               respawnPlayer()
             } else if (!session.gameOverFired && session.gameOverCountdown <= 0) {
@@ -558,6 +565,7 @@ export default function GameCanvas({
       const picked = detectPickup(powerUps, tank)
       if (picked) {
         picked.alive = false
+        audio.play('powerup-pickup')
         const effect = applyPowerUpEffect(picked.kind, {
           player: tank,
           enemies,
@@ -625,6 +633,8 @@ export default function GameCanvas({
       }
 
       lastIntentRef.current = intent
+      // 帧尾：清空音频请求去重集合，让下一帧同类事件可以再触发。
+      audio.flush()
     },
     onRender: (ctx) => {
       // pause 边沿在 render 路径处理：即使 engine 被 pause，render 仍会执行，

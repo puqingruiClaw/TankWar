@@ -23,6 +23,8 @@ import {
   sanitizeName,
   save as saveLeaderboard,
 } from '@/lib/leaderboard'
+import { audio } from '@/game/systems/AudioSystem'
+import { useBgm } from '@/hooks/useAudio'
 
 /**
  * PlayPage —— T-12 起把"单纯战场画布"升级成完整的一局；T-15 起打通
@@ -151,10 +153,12 @@ export default function PlayPage() {
   const handleStageCleared = useCallback((info: StageClearInfo) => {
     setStageClearInfo(info)
     setPhase('stage-clear')
+    audio.play('stage-clear')
   }, [])
   const handleGameOver = useCallback((info: GameOverInfo) => {
     setGameOverInfo(info)
     setPhase('game-over')
+    audio.play('game-over')
   }, [])
 
   /**
@@ -175,6 +179,7 @@ export default function PlayPage() {
         })
         setStageClearInfo(null)
         setPhase('game-complete')
+        audio.play('game-complete')
       } else {
         setLevelIndex((idx) => idx + 1)
         setStageClearInfo(null)
@@ -249,6 +254,15 @@ export default function PlayPage() {
     },
     [pendingRecord, navigate],
   )
+
+  /**
+   * BGM 生命周期：
+   * - `active`：仅在真正打斗（playing）时循环；stage-clear/game-over/game-complete
+   *   都停 BGM，让结算音效独占。ESC 暂停不停 BGM，只 duck 一下（红白机原版体验）。
+   * - `ducked`：playing + paused / pendingRecord（NameEntry 录入中）时压音量，
+   *   避免玩家操作键盘录名字被 BGM 掩盖。
+   */
+  useBgm(phase === 'playing', paused || pendingRecord !== null)
 
   const enemiesLeft = enemies.field + enemies.queue
   const subtitle = useMemo(() => {
