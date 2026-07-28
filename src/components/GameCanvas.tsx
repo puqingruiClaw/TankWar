@@ -96,10 +96,11 @@ interface GameCanvasProps {
   /** 结束一局：基地被毁 or lives 归零。 */
   onGameOver?: (info: { reason: GameOverReason; score: number; stageId: number }) => void
   /**
-   * 顶层场景阶段。'playing' 才推进世界；其余（stage-clear/game-over/paused/intro）冻结。
+   * 顶层场景阶段。'playing' 才推进世界；其余（stage-clear/game-over/game-complete/paused/intro）冻结。
    * 默认 'playing'，保持 T-11 及之前的行为不变。
+   * 'game-complete'（T-15）语义与 'game-over' 一致——冻结世界，但由 PlayPage 走"通关庆祝"分支。
    */
-  phase?: 'playing' | 'paused' | 'stage-clear' | 'game-over' | 'stage-intro'
+  phase?: 'playing' | 'paused' | 'stage-clear' | 'game-over' | 'stage-intro' | 'game-complete'
   /**
    * 触发"整局重开"的计数器。任意值变化都会重置 sessionRef（生命/得分/击杀分类）。
    * 关卡内切换（stage 递增）**不要**动这个 key，否则 lives/score 会被清零。
