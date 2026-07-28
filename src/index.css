@@ -97,6 +97,12 @@
     animation: blink 1s steps(1, end) infinite;
   }
 
+  /* T-18: 更快频率（500ms/次）的闪烁光标，用于开始菜单选中项，
+     符合 PRD 4.2 "选中项左侧闪烁小坦克 ► 图标" 的街机质感 */
+  .pixel-cursor--blink::before {
+    animation: blink 500ms steps(1, end) infinite;
+  }
+
   /* CRT scanline overlay, purely decorative */
   .crt-scanlines {
     position: relative;
