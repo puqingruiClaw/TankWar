@@ -126,11 +126,14 @@ describe('GameEngine：切 tab / 长阻塞防 spiral', () => {
   it('长阻塞后剩余 acc 被丢弃（不会在下一帧继续追帧）', () => {
     const { engine, update } = makeEngine()
     engine.start()
-    raf.step(100) // 追 5 步后仍剩下 100 - 5*16.67 ≈ 16.67ms 的余量
+    // 用"6 帧的 delta"来触发追帧上限：理论 6 步、被 MAX_STEPS_PER_FRAME(5) 截断，
+    // 剩余 acc ≈ FIXED_DT（因 IEEE 754 残差略大于阈值 → 命中 `if (acc > FIXED_DT) acc = 0`）
+    const sixFramesMs = (1000 / 60) * 6
+    raf.step(sixFramesMs)
     update.mockClear()
-    // 紧接一帧（间隔 16.67ms）：如果没丢弃 acc，应触发 2 步（旧 acc + 新增），
-    // 丢弃后只推 1 步
-    raf.step(100 + 1000 / 60)
+    // 紧接一帧（间隔 16.67ms）：若未丢弃，会触发 2 步（旧残余 + 新增）；
+    // 已丢弃则只推 1 步 —— 断言语义 = "长阻塞不会把积压带到下一帧"
+    raf.step(sixFramesMs + 1000 / 60)
     expect(update).toHaveBeenCalledTimes(1)
   })
 })

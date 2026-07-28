@@ -11,6 +11,7 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['text', 'html'],
       include: [
+        'src/game/GameEngine.ts',
         'src/game/systems/CollisionSystem.ts',
         'src/game/systems/AISystem.ts',
         'src/lib/leaderboard.ts',
