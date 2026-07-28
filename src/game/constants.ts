@@ -201,10 +201,20 @@ export const LEADERBOARD_MAX_ENTRIES = 10
 export const PLAYER_INITIAL_LIVES = 3
 
 /**
- * 玩家坦克重生时的出生保护时长（秒）；与 SPAWN_INVULNERABLE 分开，
+ * 玩家坦克重生时的出生保护时长（秒）；与 [ENEMY_SPAWN_INVULNERABLE](#L207-L214) 分开，
  * 因为红白机原版对玩家重生保护要比敌军出生保护略长（~2s）。
  */
 export const PLAYER_RESPAWN_INVULNERABLE = 2
+
+/**
+ * 新生敌军的出生保护时长（秒）；红白机原版 ~1s 闪烁 + 免疫。
+ * SpawnManager 每次生成敌军时会把该值写入 tank.invulnerable，
+ * 之后由 [MovementSystem](../systems/MovementSystem.ts) 逐帧衰减、
+ * [AISystem](../systems/AISystem.ts#L130-L130) 强制 Patrol、
+ * [CollisionSystem](../systems/CollisionSystem.ts#L121-L128) 忽略伤害、
+ * [RenderSystem](../systems/RenderSystem.ts#L96-L100) 以 8Hz 闪烁。
+ */
+export const ENEMY_SPAWN_INVULNERABLE = 1
 
 /**
  * 击杀不同类型敌军的得分表（红白机原版：100/200/300/400）。

@@ -1,4 +1,5 @@
-import type { LevelDefinition, LevelMap } from '../types'
+import { ENEMIES_PER_STAGE } from '../constants'
+import type { EnemyKind, LevelDefinition, LevelMap } from '../types'
 
 /**
  * STAGE 01 — 经典首关的 13×13 复刻：
@@ -29,30 +30,43 @@ const MAP: LevelMap = [
   /* r12 */ [0, 0, 0, 0, 0, 1, 9, 1, 0, 0, 0, 0, 0],
 ]
 
+/**
+ * 首关敌军队列。长度必须与 [ENEMIES_PER_STAGE](../constants.ts#L119-L120) 一致（T-13 契约）。
+ * 使用 `satisfies` 让 TS 保留元素字面量类型，同时下方 `if` 做运行时长度断言，
+ * 防止未来手改 map 时漏掉/多写一格；生产 build 会因 ESLint no-console 而暴露。
+ */
+const ENEMY_QUEUE = [
+  'basic',
+  'basic',
+  'basic',
+  'basic',
+  'basic',
+  'basic',
+  'basic',
+  'basic',
+  'basic',
+  'basic',
+  'fast',
+  'fast',
+  'fast',
+  'fast',
+  'basic',
+  'basic',
+  'basic',
+  'basic',
+  'basic',
+  'basic',
+] as const satisfies readonly EnemyKind[]
+
+if (ENEMY_QUEUE.length !== ENEMIES_PER_STAGE) {
+  throw new Error(
+    `[STAGE_01] enemyQueue length ${ENEMY_QUEUE.length} !== ENEMIES_PER_STAGE (${ENEMIES_PER_STAGE})`,
+  )
+}
+
 export const STAGE_01: LevelDefinition = {
   id: 1,
   name: 'STAGE 01',
   map: MAP,
-  enemyQueue: [
-    'basic',
-    'basic',
-    'basic',
-    'basic',
-    'basic',
-    'basic',
-    'basic',
-    'basic',
-    'basic',
-    'basic',
-    'fast',
-    'fast',
-    'fast',
-    'fast',
-    'basic',
-    'basic',
-    'basic',
-    'basic',
-    'basic',
-    'basic',
-  ],
+  enemyQueue: ENEMY_QUEUE,
 }

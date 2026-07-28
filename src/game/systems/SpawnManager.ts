@@ -1,24 +1,34 @@
 /**
- * SpawnManager —— 敌军刷新调度器。
+ * SpawnManager —— 敌军刷新调度器（T-13 SpawnSystem 交付载体）。
  *
- * 职责：
- * 1. 消费 [LevelDefinition.enemyQueue](../types.ts#L102-L108) 头部元素，按顺序放到 3 个刷新点。
- * 2. 计时：每 [ENEMY_SPAWN_INTERVAL](../constants.ts#L142-L142) 秒尝试刷一只，
- *    受 [MAX_ENEMIES_ON_FIELD](../constants.ts#L123-L123) 上限约束。
- * 3. 出生保护：新生敌军出生后有 `SPAWN_INVULNERABLE` 秒无敌 + 闪烁（复用 Tank.invulnerable）。
- * 4. 出生点占位检测：若某刷新点正好被玩家 / 已有敌军挡住，跳过这个点并轮到下一个；
- *    三个点都被占则本次尝试作废，等下一个计时窗口再来。
- * 5. 刷新点在 3 个候选中"round-robin"轮转，与红白机原版一致，视觉上更均匀。
+ * ─── T-13 契约（20 台 / 同屏 4 / 出生保护） ──────────────────────────────────
+ * 1. **20 台/关**：构造时接收 [LevelDefinition.enemyQueue](../types.ts#L102-L108)，
+ *    长度对齐 [ENEMIES_PER_STAGE](../constants.ts#L119-L120)。队列头部按顺序被
+ *    [step](#L107-L132) 消费，[isQueueDrained](#L98-L100) 判定后由 GameCanvas 结算 stage-clear。
+ * 2. **同屏 4 台**：`maxOnField` 默认取 [MAX_ENEMIES_ON_FIELD](../constants.ts#L123-L123)=4；
+ *    每次 tick 检查 [countAliveEnemies](#L177-L181)，达到上限则**不消耗队列**、等下一 tick。
+ * 3. **出生保护**：新生敌军写入 [ENEMY_SPAWN_INVULNERABLE](../constants.ts#L217-L217)（~1s），
+ *    衍生行为分布在 4 个系统里：
+ *    - [MovementSystem](./MovementSystem.ts) 逐帧扣减；
+ *    - [AISystem](./AISystem.ts#L130-L130) 强制 Patrol 状态；
+ *    - [CollisionSystem](./CollisionSystem.ts#L121-L128) 忽略子弹伤害；
+ *    - [RenderSystem](./RenderSystem.ts#L96-L100) 以 8Hz 频率闪烁。
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * 其他职责：
+ * 4. **出生点占位检测**：某刷新点被玩家/敌军挡住时跳过、轮下一个；三个都被占则本 tick 作废。
+ * 5. **round-robin**：3 个候选点循环选择，与红白机原版一致，视觉上更均匀。
  *
  * 教学要点：
- * - **状态与副作用分离**：SpawnManager 不直接把敌军推进游戏世界，而是通过 `spawn` 回调
- *   把新坦克交给调用方（GameCanvas / GameEngine），方便测试。
+ * - **状态与副作用分离**：SpawnManager 不直接把敌军塞进游戏世界，而是通过 `spawn` 返回值
+ *   把新坦克交给调用方（GameCanvas / GameEngine），方便未来接单元测试。
  * - **确定性**：接受一个 [Rng](../utils/rng.ts#L10-L19)，让敌军 kind 序列可复现（虽然
- *   当前 queue 已是确定序列，但未来 T-15/16 可能用 rng 做随机替代）。
+ *   当前 queue 已是确定序列，但 T-16 会用 rng 做随机替代）。
  */
 
 import {
   ENEMY_SPAWN_INTERVAL,
+  ENEMY_SPAWN_INVULNERABLE,
   ENEMY_SPAWN_POINTS,
   MAX_ENEMIES_ON_FIELD,
   TILE_SIZE,
@@ -28,8 +38,13 @@ import { rectsIntersect, makeRect } from '../utils/grid'
 import { canTankOccupy } from './MovementSystem'
 import type { EnemyKind, LevelMap, Tank } from '../types'
 
-/** 新生敌军的出生保护时长（秒）。红白机原版约 1s 闪烁 + 免疫。 */
-export const SPAWN_INVULNERABLE = 1
+/**
+ * 新生敌军的出生保护时长（秒）；直接透传自 [ENEMY_SPAWN_INVULNERABLE](../constants.ts#L217-L217)。
+ * 保留同名 re-export 是为了兼容早期引用点（GameEngine/AISystem/RenderSystem 都可能引用）。
+ *
+ * @deprecated 新代码请直接从 constants 导入 [ENEMY_SPAWN_INVULNERABLE](../constants.ts#L217-L217)。
+ */
+export const SPAWN_INVULNERABLE = ENEMY_SPAWN_INVULNERABLE
 
 export interface SpawnManagerOptions {
   /** 关卡预设的敌军类型序列（长度通常 = ENEMIES_PER_STAGE）。 */
@@ -118,7 +133,7 @@ export class SpawnManager {
 
     const kind = this.remaining.shift()!
     const enemy = createEnemyTank({ kind, col: point.col, row: point.row, facing: 'down' })
-    enemy.invulnerable = SPAWN_INVULNERABLE
+    enemy.invulnerable = ENEMY_SPAWN_INVULNERABLE
     // 敌军出生就带 cooldown，避免"刚出生就爆头"；createEnemyTank 已经把
     // cooldown 设为 TANK_COOLDOWN.ENEMY，这里再显式确认一次让代码更自证。
     spawned.push(enemy)

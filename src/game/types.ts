@@ -107,7 +107,7 @@ export interface LevelDefinition {
   name: string
   map: LevelMap
   /** 该关敌军类型序列（长度需等于 ENEMIES_PER_STAGE）。*/
-  enemyQueue: EnemyKind[]
+  enemyQueue: readonly EnemyKind[]
 }
 
 // ─── 游戏状态 ────────────────────────────────────────────────────────────────
