@@ -17,7 +17,12 @@ import { PLAYER_INITIAL_LIVES, STAGE_CLEAR_DURATION } from '@/game/constants'
 import { DEFAULT_LEVEL, LEVELS } from '@/game/maps/levels'
 import type { EngineStats } from '@/game/GameEngine'
 import type { InputIntent, LevelDefinition, PowerUpKind, Tank } from '@/game/types'
-import { insert as insertLeaderboard, qualifies, save as saveLeaderboard } from '@/lib/leaderboard'
+import {
+  insert as insertLeaderboard,
+  qualifies,
+  sanitizeName,
+  save as saveLeaderboard,
+} from '@/lib/leaderboard'
 
 /**
  * PlayPage —— T-12 起把"单纯战场画布"升级成完整的一局；T-15 起打通
@@ -229,8 +234,11 @@ export default function PlayPage() {
   const handleNameSubmit = useCallback(
     (name: string) => {
       if (!pendingRecord) return
+      // 兵底 sanitize：NameEntryOverlay 键盘通道理论上只会产出 A-Z 三字母，
+      // 但契约上任何入榜路径都必须经过清洗，保证数据一致性。
+      const cleanName = sanitizeName(name)
       const { rank, list } = insertLeaderboard({
-        name,
+        name: cleanName,
         score: pendingRecord.score,
         stage: pendingRecord.stageId,
         createdAt: Date.now(),
@@ -281,10 +289,10 @@ export default function PlayPage() {
               isFinalStage={levelIndex >= LEVELS.length - 1}
             />
           )}
-          {phase === 'game-over' && gameOverInfo && (
+          {phase === 'game-over' && gameOverInfo && !pendingRecord && (
             <GameOverOverlay info={gameOverInfo} onRetry={handleRetry} />
           )}
-          {phase === 'game-complete' && gameCompleteInfo && (
+          {phase === 'game-complete' && gameCompleteInfo && !pendingRecord && (
             <GameCompleteOverlay info={gameCompleteInfo} onRetry={handleRetry} />
           )}
           {pendingRecord && (phase === 'game-over' || phase === 'game-complete') && (

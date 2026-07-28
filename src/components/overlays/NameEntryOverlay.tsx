@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { load as loadLeaderboard } from '@/lib/leaderboard'
 
 /**
  * NameEntryOverlay —— T-21 引入。破纪录时呼出的 3 字母昵称录入面板。
@@ -33,6 +34,17 @@ export default function NameEntryOverlay({ score, stageId, onSubmit }: NameEntry
   useEffect(() => {
     onSubmitRef.current = onSubmit
   }, [onSubmit])
+
+  /**
+   * T-21 收尾：判定本次是否刷新最高分（严格大于榜首）。
+   * - 无榜数据时视为 true（第一条永远是最高纪录）；
+   * - 用 useMemo + [] 依赖：昵称录入过程中排行榜不会变，只在挂载那一刻读一次即可。
+   */
+  const isNewHiScore = useMemo(() => {
+    const list = loadLeaderboard()
+    if (list.length === 0) return true
+    return score > list[0].score
+  }, [score])
 
   const submit = useCallback((next: number[]) => {
     const name = next.map((idx) => ALPHABET[idx]).join('')
@@ -86,7 +98,9 @@ export default function NameEntryOverlay({ score, stageId, onSubmit }: NameEntry
       aria-label="Enter your name"
       className="absolute inset-0 z-10 flex flex-col items-center justify-center bg-black/90 font-pixel text-white"
     >
-      <p className="text-pixel-lg text-hud-accent">NEW RECORD!</p>
+      <p className="text-pixel-lg text-hud-accent">
+        {isNewHiScore ? 'NEW HI-SCORE!' : 'NEW RECORD!'}
+      </p>
       <p className="mt-2 text-pixel-sm text-outline">
         SCORE <span className="text-hud-accent">{score.toString().padStart(6, '0')}</span> · STAGE{' '}
         <span className="text-hud-accent">{stageId.toString().padStart(2, '0')}</span>

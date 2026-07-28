@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import StageLayout from '@/layouts/StageLayout'
 import { LEADERBOARD_MAX_ENTRIES } from '@/game/constants'
@@ -29,10 +29,19 @@ const EMPTY_NUM = '------'
 
 export default function LeaderboardPage() {
   const [searchParams] = useSearchParams()
-  const highlightRank = Number(searchParams.get('rank') ?? '0') || 0
+  const urlRank = Number(searchParams.get('rank') ?? '0') || 0
+  // 高亮 rank：初始复制 URL 参数，但会在 5s 后自动清零（避免用户浏览榜单时永远闪烁分神）。
+  const [highlightRank, setHighlightRank] = useState(urlRank)
   // 用一个计数器强制 load() 重新求值——CLEAR 之后不需要跳路由也能立即刷新表格。
   const [tick, setTick] = useState(0)
   const [confirming, setConfirming] = useState(false)
+
+  useEffect(() => {
+    if (urlRank <= 0) return
+    setHighlightRank(urlRank)
+    const timer = window.setTimeout(() => setHighlightRank(0), 5000)
+    return () => window.clearTimeout(timer)
+  }, [urlRank])
 
   const entries = useMemo<LeaderboardEntry[]>(() => {
     // tick 是"手动缓存失效开关"——localStorage 不是 React state，hook 依赖分析

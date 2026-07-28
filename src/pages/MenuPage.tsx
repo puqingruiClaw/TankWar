@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { LEADERBOARD_STORAGE_KEY } from '@/game/constants'
+import { load as loadLeaderboard } from '@/lib/leaderboard'
 
 /**
  * MenuPage —— T-18：把最初的"三行菜单原型"升级成完整 FC 街机风开始菜单。
@@ -31,30 +31,24 @@ const MENU_ITEMS: readonly MenuItem[] = [
 ] as const
 
 /**
- * 从 localStorage 读取本地排行榜的最高分。
- * - 仅读，不写；容错任何 JSON / 结构异常，缺省 0。
- * - T-21 会写入这块数据；T-18 只是"提前展示"。
+ * useHiScore —— 读取本地排行榜首位分数。
+ *
+ * T-21：改为委托给 [leaderboard.load](file:///Users/puqingrui/workspace/Projects/TankWar/src/lib/leaderboard.ts#L71-L82)，删除内部
+ * 手写的 JSON 解析逻辑，保证与排行榜页面走同一份"防御式解析 + 稳定排序"
+ * 的实现；由此，MenuPage 展示的最高分永远等于 LeaderboardPage 排名 #1
+ * 的分数（含"平局按登记先后"这类细节）。
+ *
+ * 用 useEffect + useState 而非 useMemo：路由回菜单会重新挂载组件时读一次；
+ * 未来若加"跨页/tab 同步 storage 事件监听"，只需在此 effect 内 return
+ * cleanup 与 event listener 即可，扩展性最好。
  */
 function useHiScore(): number {
-  return useMemo(() => {
-    if (typeof window === 'undefined') return 0
-    try {
-      const raw = window.localStorage.getItem(LEADERBOARD_STORAGE_KEY)
-      if (!raw) return 0
-      const parsed: unknown = JSON.parse(raw)
-      if (!Array.isArray(parsed)) return 0
-      let best = 0
-      for (const row of parsed) {
-        if (row && typeof row === 'object' && 'score' in row) {
-          const s = Number((row as { score: unknown }).score)
-          if (Number.isFinite(s) && s > best) best = s
-        }
-      }
-      return best
-    } catch {
-      return 0
-    }
+  const [hi, setHi] = useState(0)
+  useEffect(() => {
+    const list = loadLeaderboard()
+    setHi(list.length > 0 ? list[0].score : 0)
   }, [])
+  return hi
 }
 
 export default function MenuPage() {
