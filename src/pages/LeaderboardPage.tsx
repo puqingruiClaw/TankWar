@@ -15,7 +15,8 @@ import { clear as clearLeaderboard, load, type LeaderboardEntry } from '@/lib/le
  * PlayPage 提交昵称后会 [navigate('/leaderboard?rank=N')](file:///Users/puqingrui/workspace/Projects/TankWar/src/pages/PlayPage.tsx)。
  *
  * 清榜：CLEAR 键需要**两次确认**（第一次变红提示 "SURE?"，再点才真正清空），
- * 防止玩家手滑一键清空成就。
+ * 防止玩家手滑一键清空成就。T-25 UX 打磨：若进入 SURE? 状态后 5 秒内没有
+ * 二次确认，会自动回退到普通 CLEAR，避免用户浏览榜单时"忘了自己刚点了什么"。
  */
 
 const RANK_COLOR: Record<number, string> = {
@@ -42,6 +43,16 @@ export default function LeaderboardPage() {
     const timer = window.setTimeout(() => setHighlightRank(0), 5000)
     return () => window.clearTimeout(timer)
   }, [urlRank])
+
+  /**
+   * T-25：CLEAR 进入 SURE? 状态后，5s 无操作自动回退。使用 5s 而非 3s，
+   * 与破榜高亮 timer 保持一致；也给玩家足够时间读完确认文案再决定。
+   */
+  useEffect(() => {
+    if (!confirming) return
+    const timer = window.setTimeout(() => setConfirming(false), 5000)
+    return () => window.clearTimeout(timer)
+  }, [confirming])
 
   const entries = useMemo<LeaderboardEntry[]>(() => {
     // tick 是"手动缓存失效开关"——localStorage 不是 React state，hook 依赖分析

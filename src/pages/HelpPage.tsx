@@ -8,7 +8,9 @@ interface KeyRow {
 const P1_KEYS: readonly KeyRow[] = [
   { keys: '↑ ↓ ← →', action: 'MOVE' },
   { keys: 'SPACE', action: 'FIRE' },
-  { keys: 'ESC', action: 'PAUSE' },
+  { keys: 'ESC', action: 'PAUSE / BACK TO MENU' },
+  { keys: 'ENTER', action: 'CONFIRM / RETRY' },
+  { keys: 'M', action: 'MUTE TOGGLE' },
 ]
 
 const RULES: readonly string[] = [
@@ -35,7 +37,7 @@ export default function HelpPage() {
             </tbody>
           </table>
           <p className="mt-3 font-pixel text-pixel-sm text-outline">
-            KEYS ARE REBINDABLE IN SETTINGS (T-25).
+            SETTINGS PAGE PLANNED FOR A LATER RELEASE.
           </p>
         </section>
 
