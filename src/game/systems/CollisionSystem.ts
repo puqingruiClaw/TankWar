@@ -10,7 +10,8 @@
  *   bullet → steel       | power=1 反弹销毁；power=2 钢块变 EMPTY，子弹销毁
  *   bullet → water/ice   | 穿过（不影响）
  *   bullet → grass       | 穿过（不影响，视觉遮蔽由 RenderSystem 处理）
- *   bullet → base        | 基地损毁 → 触发 game-over 事件（回调）
+ *   bullet → base        | 基地损毁 → 该 tile 变 [BASE_DEAD](../constants.ts#L61-L61)，
+ *                          冒泡 onBaseHit 事件；后续子弹遇 BASE_DEAD 直接穿过（不再触发）。
  *   bullet A → bullet B  | 双双销毁（同帧成对消除；红白机原版规则）
  *   bullet → tank        | 若 tank.invulnerable>0 则忽略；否则 tank.hp--，
  *                          hp<=0 → tank.alive=false，子弹销毁（无论是否击杀）
@@ -28,7 +29,7 @@ import {
   rectsIntersect,
   tileCodeAt,
 } from '../utils/grid'
-import type { Bullet, LevelMap, Rect, Tank } from '../types'
+import type { Bullet, LevelMap, Rect, Tank, TileCode } from '../types'
 
 const DIR_VECTORS = {
   up: { x: 0, y: -1 },
@@ -158,10 +159,12 @@ function tankRect(t: Tank): Rect {
 
 /**
  * 处理"子弹 vs 地形"：遍历子弹 rect 覆盖到的所有网格 tile，遇到硬 tile 就击中。
- * - brick → 恒变 EMPTY，子弹销毁
- * - steel → power=2 才破坏；否则弹开销毁
- * - base  → 立刻触发 onBaseHit，子弹销毁（原版会把 base tile 换成骷髅，
- *           视觉细节留到 T-12 GameOver 场景）
+ * - brick     → 恒变 EMPTY，子弹销毁
+ * - steel     → power=2 才破坏；否则弹开销毁
+ * - base      → 立刻触发 onBaseHit，tile 就地变 [BASE_DEAD](../constants.ts#L61-L61) 保留骷髅占位，
+ *               子弹销毁；因为 BASE_DEAD 不在此 switch 内，后续子弹将直接穿过而不再重触发。
+ * - base-dead → 已毁的基地格；命中判定跳过（子弹在 [MovementSystem](./MovementSystem.ts#L23-L28)
+ *               的 TANK_BLOCKING_TILES 里也被移除，坦克可通行）
  * - water/ice/grass/empty → 忽略
  *
  * 返回 true 表示子弹本帧已被销毁。
@@ -169,6 +172,7 @@ function tankRect(t: Tank): Rect {
 function resolveBulletVsTerrain(bullet: Bullet, map: LevelMap, events?: CollisionEvents): boolean {
   let hit = false
   const cellsToClear: Array<{ col: number; row: number }> = []
+  const cellsToMark: Array<{ col: number; row: number; code: TileCode }> = []
   let hitBase = false
 
   forEachOverlappedCell(bulletRect(bullet), (col, row) => {
@@ -183,6 +187,9 @@ function resolveBulletVsTerrain(bullet: Bullet, map: LevelMap, events?: Collisio
         hit = true
         return true
       case TILE_CODE.BASE:
+        // 基地毁：把 tile 就地改成 BASE_DEAD（灰色骷髅），而不是 EMPTY，
+        // 这样视觉上保留"废墟"占位，AI/寻路/子弹都能识别为"已毁基地"。
+        cellsToMark.push({ col, row, code: TILE_CODE.BASE_DEAD })
         hitBase = true
         hit = true
         return true
@@ -195,6 +202,9 @@ function resolveBulletVsTerrain(bullet: Bullet, map: LevelMap, events?: Collisio
 
   for (const { col, row } of cellsToClear) {
     if (inGridBounds(col, row)) map[row][col] = TILE_CODE.EMPTY
+  }
+  for (const { col, row, code } of cellsToMark) {
+    if (inGridBounds(col, row)) map[row][col] = code
   }
 
   bullet.alive = false

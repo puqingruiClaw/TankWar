@@ -33,7 +33,8 @@ export interface GridPoint {
 
 export type Direction = 'up' | 'down' | 'left' | 'right'
 
-export type TileType = 'empty' | 'brick' | 'steel' | 'water' | 'grass' | 'ice' | 'base'
+export type TileType =
+  'empty' | 'brick' | 'steel' | 'water' | 'grass' | 'ice' | 'base' | 'base-dead'
 
 /** 关卡数值编码：TILE_CODE 各成员值构成的 union。*/
 export type TileCode = (typeof TILE_CODE)[keyof typeof TILE_CODE]

@@ -65,6 +65,9 @@ export class RenderSystem {
           case TILE_CODE.BASE:
             drawBase(ctx, x, y)
             break
+          case TILE_CODE.BASE_DEAD:
+            drawBaseDead(ctx, x, y)
+            break
           default:
             break
         }
@@ -231,6 +234,34 @@ function drawBase(ctx: CanvasRenderingContext2D, x: number, y: number): void {
   ctx.fillRect(cx - 2, cy - 4, 4, 6)
   ctx.fillRect(cx - 4, cy + 4, 2, 4)
   ctx.fillRect(cx + 2, cy + 4, 2, 4)
+}
+
+/**
+ * 已毁基地（T-14）：灰色骷髅头 + 交叉骨。红白机原版毁鹰是"鹰徽变灰 + 十字骨"，
+ * 这里用像素方块拼一个粗略的骷髅轮廓，让玩家一眼看出"这里曾经是基地"。
+ */
+function drawBaseDead(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  ctx.fillStyle = '#000000'
+  ctx.fillRect(x, y, TILE_SIZE, TILE_SIZE)
+
+  const cx = x + TILE_SIZE / 2
+  const cy = y + TILE_SIZE / 2
+
+  // 头骨主体：14×12 灰色圆角矩形（用 3 段拼接近似圆角）。
+  ctx.fillStyle = PALETTE.terrain.baseDeadHi
+  ctx.fillRect(cx - 6, cy - 10, 12, 2)
+  ctx.fillRect(cx - 7, cy - 8, 14, 10)
+  ctx.fillRect(cx - 5, cy + 2, 10, 2)
+
+  // 骷髅"下颚"：两条短牙。
+  ctx.fillRect(cx - 4, cy + 4, 2, 3)
+  ctx.fillRect(cx + 2, cy + 4, 2, 3)
+
+  // 眼窝 & 鼻孔：暗色。
+  ctx.fillStyle = PALETTE.terrain.baseDead
+  ctx.fillRect(cx - 5, cy - 5, 3, 4)
+  ctx.fillRect(cx + 2, cy - 5, 3, 4)
+  ctx.fillRect(cx - 1, cy, 2, 2)
 }
 
 // ─── 坦克绘制单元 ────────────────────────────────────────────────────────────

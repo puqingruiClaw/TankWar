@@ -58,12 +58,17 @@ export const TILE_CODE = {
   WATER: 3,
   GRASS: 4,
   ICE: 5,
+  BASE_DEAD: 8,
   BASE: 9,
 } as const
 
 /**
  * 地形编码 → 语义 tile 名称。
  * TILE_CODE 与 TileType 的双向映射，运行时按需读取；避免 switch 语句散落。
+ *
+ * T-14 起新增 `base-dead`：基地被子弹击中后由 CollisionSystem 就地写入该编码，
+ * RenderSystem 会绘制成灰色骷髅（红白机原版毁鹰视觉），MovementSystem 视其为
+ * 非阻挡（此时基地已毁，坦克可通行），子弹直接穿过。
  */
 export const TILE_CODE_TO_TYPE = {
   [TILE_CODE.EMPTY]: 'empty',
@@ -72,6 +77,7 @@ export const TILE_CODE_TO_TYPE = {
   [TILE_CODE.WATER]: 'water',
   [TILE_CODE.GRASS]: 'grass',
   [TILE_CODE.ICE]: 'ice',
+  [TILE_CODE.BASE_DEAD]: 'base-dead',
   [TILE_CODE.BASE]: 'base',
 } as const
 
@@ -265,6 +271,9 @@ export const PALETTE = {
     grass: '#5fbb1e',
     ice: '#c3e8ff',
     base: '#e6e62e',
+    /** T-14：基地被摧毁后的骷髅色，暗灰 + 骨白双色。 */
+    baseDead: '#6a6a6a',
+    baseDeadHi: '#d9d9d9',
   },
   bullet: '#ffffff',
 } as const

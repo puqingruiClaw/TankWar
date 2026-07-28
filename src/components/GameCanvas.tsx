@@ -189,6 +189,14 @@ interface SessionState {
   gameOverFired: boolean
   /** 基地被毁后的倒计时（>0 表示已进入"等 GAME_OVER_DELAY 秒发 game-over"状态）。 */
   gameOverCountdown: number
+  /**
+   * 触发倒计时时锁定的原因；不再从 `isBaseAlive` 反推，避免
+   * "同一帧内基地毁 + 玩家0命" 时序模糊。
+   * - 'base-destroyed'：onBaseHit 现场写入；
+   * - 'lives-exhausted'：onPlayerKilled 且 lives 归零现场写入。
+   * null 表示当前无待发的 game-over。
+   */
+  pendingGameOverReason: GameOverReason | null
 }
 
 function createInitialSession(): SessionState {
@@ -200,6 +208,7 @@ function createInitialSession(): SessionState {
     stageClearFired: false,
     gameOverFired: false,
     gameOverCountdown: 0,
+    pendingGameOverReason: null,
   }
 }
 
@@ -386,7 +395,11 @@ export default function GameCanvas({
           onBaseHit: () => {
             callbacksRef.current.onBaseHit?.()
             // 基地爆破：延迟 GAME_OVER_DELAY 秒发 game-over，让爆炸有时间演出。
-            if (session.gameOverCountdown <= 0) session.gameOverCountdown = GAME_OVER_DELAY
+            // 在现场直接锁定 reason，避免后续帧靠 `isBaseAlive` 推断出错。
+            if (session.gameOverCountdown <= 0) {
+              session.gameOverCountdown = GAME_OVER_DELAY
+              session.pendingGameOverReason = 'base-destroyed'
+            }
           },
           onEnemyKilled: (killed) => {
             if (!isEnemyTank(killed)) return
@@ -401,8 +414,9 @@ export default function GameCanvas({
             if (session.lives > 0) {
               respawnPlayer()
             } else if (!session.gameOverFired && session.gameOverCountdown <= 0) {
-              // 玩家 0 命：立即（下一帧）触发 game-over。
+              // 玩家 0 命：立即（下一帧）触发 game-over；同样在现场锁定 reason。
               session.gameOverCountdown = GAME_OVER_DELAY
+              session.pendingGameOverReason = 'lives-exhausted'
             }
           },
         },
@@ -428,11 +442,12 @@ export default function GameCanvas({
       }
 
       //    game-over：基地爆破 or 玩家 0 命触发倒计时；倒计时归零 → emit。
+      //    reason 来自触发现场锁定的 `pendingGameOverReason`，不再靠状态反推。
       if (session.gameOverCountdown > 0) {
         session.gameOverCountdown = Math.max(0, session.gameOverCountdown - dt)
         if (session.gameOverCountdown <= 0 && !session.gameOverFired) {
           session.gameOverFired = true
-          const reason: GameOverReason = isBaseAlive ? 'lives-exhausted' : 'base-destroyed'
+          const reason: GameOverReason = session.pendingGameOverReason ?? 'base-destroyed'
           callbacksRef.current.onGameOver?.({
             reason,
             score: session.score,

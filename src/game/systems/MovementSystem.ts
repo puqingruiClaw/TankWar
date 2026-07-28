@@ -19,7 +19,13 @@ import { TILE_SIZE } from '../constants'
 import { alignToTile, collidesWithTerrain, inCanvasBounds, makeRect } from '../utils/grid'
 import type { Direction, InputIntent, LevelMap, Rect, Tank, TileType } from '../types'
 
-/** 阻挡坦克前进的地形集合。grass/ice 不在其中（草：遮蔽；冰：滑行）。 */
+/**
+ * 阻挡坦克前进的地形集合。grass/ice/base-dead 均不在其中：
+ * - grass：视觉遮蔽，不影响通行；
+ * - ice：滑行，不阻挡；
+ * - base-dead（T-14）：基地已毁，此格视同废墟通道，坦克可通行；
+ *   有意与活着的 `base` 区分，防止 "基地毁后 AI 仍绕行" 造成的行为割裂。
+ */
 export const TANK_BLOCKING_TILES: ReadonlySet<TileType> = new Set([
   'brick',
   'steel',
