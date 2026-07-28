@@ -1,14 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import StageLayout from '@/layouts/StageLayout'
-import GameCanvas, { type GameOverReason, type KillByKind } from '@/components/GameCanvas'
+import GameCanvas from '@/components/GameCanvas'
 import GameHUD from '@/components/GameHUD'
 import {
-  PLAYER_INITIAL_LIVES,
-  SCORE_TABLE,
-  STAGE_CLEAR_DURATION,
-  STAGE_CLEAR_TICK,
-} from '@/game/constants'
-import { DEFAULT_LEVEL, LEVELS, TOTAL_STAGES } from '@/game/maps/levels'
+  GameCompleteOverlay,
+  type GameCompleteInfo,
+  GameOverOverlay,
+  type GameOverInfo,
+  PauseOverlay,
+  StageClearOverlay,
+  type StageClearInfo,
+} from '@/components/overlays'
+import { PLAYER_INITIAL_LIVES, STAGE_CLEAR_DURATION } from '@/game/constants'
+import { DEFAULT_LEVEL, LEVELS } from '@/game/maps/levels'
 import type { EngineStats } from '@/game/GameEngine'
 import type { InputIntent, LevelDefinition, PowerUpKind, Tank } from '@/game/types'
 
@@ -45,16 +49,10 @@ const INITIAL_TANK: Pick<Tank, 'x' | 'y' | 'dir' | 'level' | 'hp' | 'invulnerabl
   cooldown: 0,
 }
 
-interface StageClearInfo {
-  killByKind: KillByKind
-  score: number
-  stageId: number
-}
-
-interface GameOverInfo {
-  reason: GameOverReason
-  score: number
-  stageId: number
+interface EnemiesInfo {
+  field: number
+  queue: number
+  totalSpawned: number
 }
 
 export default function PlayPage() {
@@ -71,7 +69,7 @@ export default function PlayPage() {
   const [paused, setPaused] = useState(false)
   const [bulletsAlive, setBulletsAlive] = useState(0)
   const [baseDown, setBaseDown] = useState(false)
-  const [enemies, setEnemies] = useState<{ field: number; queue: number; totalSpawned: number }>({
+  const [enemies, setEnemies] = useState<EnemiesInfo>({
     field: 0,
     queue: level.enemyQueue.length,
     totalSpawned: 0,
@@ -107,10 +105,7 @@ export default function PlayPage() {
    * 结算面板停在最后一关的数据上，通关面板则展示"最终总分 + 最终关卡编号"，
    * 二者在同一 phase 上会打架，因此各持一份 state。
    */
-  const [gameCompleteInfo, setGameCompleteInfo] = useState<{
-    finalScore: number
-    finalStageId: number
-  } | null>(null)
+  const [gameCompleteInfo, setGameCompleteInfo] = useState<GameCompleteInfo | null>(null)
 
   const handleStats = useCallback((s: EngineStats) => setStats(s), [])
   const handleInput = useCallback((i: InputIntent) => setIntent(i), [])
@@ -131,10 +126,7 @@ export default function PlayPage() {
   }, [])
   const handleBullets = useCallback((alive: number) => setBulletsAlive(alive), [])
   const handleBaseHit = useCallback(() => setBaseDown(true), [])
-  const handleEnemies = useCallback(
-    (info: { field: number; queue: number; totalSpawned: number }) => setEnemies(info),
-    [],
-  )
+  const handleEnemies = useCallback((info: EnemiesInfo) => setEnemies(info), [])
   const handleScore = useCallback((s: number) => setScore(s), [])
   const handleLives = useCallback((l: number) => setLives(l), [])
   const handlePowerUp = useCallback(
@@ -230,6 +222,7 @@ export default function PlayPage() {
             onGameOver={handleGameOver}
           />
 
+          {phase === 'playing' && paused && <PauseOverlay />}
           {phase === 'stage-clear' && stageClearInfo && (
             <StageClearOverlay
               info={stageClearInfo}
@@ -260,159 +253,5 @@ export default function PlayPage() {
         />
       </div>
     </StageLayout>
-  )
-}
-
-/**
- * StageClearOverlay —— 关卡结算面板。
- *
- * 逐条统计：按 `basic → fast → power → armor` 顺序，每 [STAGE_CLEAR_TICK](file:///Users/puqingrui/workspace/Projects/TankWar/src/game/constants.ts#L233-L233)
- * 秒揭示一行；全部揭示后显示 "TOTAL" 与关卡分数，然后 PlayPage 定时器自动切下一关。
- *
- * T-15：新增 `isFinalStage` —— 末关不再显示 "NEXT STAGE..."，改为
- * "MISSION COMPLETE..." 作为通关前奏；同一 timer 结束后 phase 会切到 game-complete。
- */
-function StageClearOverlay({
-  info,
-  isFinalStage,
-}: {
-  info: StageClearInfo
-  isFinalStage: boolean
-}) {
-  const rows = useMemo(
-    () =>
-      (['basic', 'fast', 'power', 'armor'] as const).map((kind) => ({
-        kind,
-        count: info.killByKind[kind] ?? 0,
-        unit: SCORE_TABLE[kind],
-      })),
-    [info],
-  )
-  const [revealed, setRevealed] = useState(0)
-
-  useEffect(() => {
-    setRevealed(0)
-    let i = 0
-    const id = window.setInterval(() => {
-      i += 1
-      setRevealed(i)
-      if (i >= rows.length) window.clearInterval(id)
-    }, STAGE_CLEAR_TICK * 1000)
-    return () => window.clearInterval(id)
-  }, [rows.length])
-
-  const stageTotal = rows.reduce((acc, r) => acc + r.count * r.unit, 0)
-
-  return (
-    <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center bg-black/85 font-pixel text-white">
-      <p className="text-pixel-2xl text-hud-accent">
-        STAGE {info.stageId.toString().padStart(2, '0')}
-      </p>
-      <p className="mt-1 text-pixel-lg text-hud-accent animate-blink">CONGRATULATIONS!</p>
-      <div className="mt-4 flex flex-col gap-1 text-pixel-sm">
-        {rows.map((r, i) => (
-          <div key={r.kind} className="grid grid-cols-3 gap-4">
-            <span className="uppercase text-outline">{r.kind}</span>
-            <span className="text-right text-white">
-              {i < revealed ? r.count.toString().padStart(2, '0') : '--'} × {r.unit}
-            </span>
-            <span className="text-right text-hud-accent">
-              {i < revealed ? (r.count * r.unit).toString().padStart(5, '0') : '-----'}
-            </span>
-          </div>
-        ))}
-      </div>
-      <p className="mt-4 text-pixel-lg">
-        TOTAL <span className="text-hud-accent">{stageTotal.toString().padStart(6, '0')}</span>
-      </p>
-      <p className="mt-6 animate-blink text-pixel-sm text-outline">
-        {isFinalStage ? 'MISSION COMPLETE...' : 'NEXT STAGE...'}
-      </p>
-    </div>
-  )
-}
-
-/**
- * GameOverOverlay —— 结束一局。
- *
- * 红色 GAME OVER 像素字体 + 分数 + 触发原因 + RETRY / MENU 快捷按钮。
- * RETRY 会触发 [handleRetry](#L117-L124) 整局重开。
- */
-function GameOverOverlay({ info, onRetry }: { info: GameOverInfo; onRetry: () => void }) {
-  const reasonLabel = info.reason === 'base-destroyed' ? 'YOUR BASE FELL' : 'ALL LIVES LOST'
-  return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 font-pixel text-white">
-      <p className="text-pixel-2xl text-tank-enemyArmor">GAME</p>
-      <p className="text-pixel-2xl text-tank-enemyArmor">OVER</p>
-      <p className="mt-4 text-pixel-sm text-outline">{reasonLabel}</p>
-      <p className="mt-4 text-pixel-lg">
-        SCORE <span className="text-hud-accent">{info.score.toString().padStart(6, '0')}</span>
-      </p>
-      <p className="mt-1 text-pixel-sm text-outline">
-        STAGE {info.stageId.toString().padStart(2, '0')}
-      </p>
-      <div className="mt-6 flex gap-3">
-        <button
-          type="button"
-          onClick={onRetry}
-          className="border-2 border-outline px-4 py-2 font-pixel text-pixel-sm text-hud-accent hover:bg-outline/30"
-        >
-          RETRY
-        </button>
-        <a
-          href="#/"
-          className="border-2 border-outline px-4 py-2 font-pixel text-pixel-sm text-white hover:bg-outline/30"
-        >
-          MENU
-        </a>
-      </div>
-    </div>
-  )
-}
-
-/**
- * GameCompleteOverlay —— 一周目通关庆祝面板（T-15）。
- *
- * 触发条件：末关 stage-clear 计时结束（不是 base 被毁 / 命耗尽）。
- * 展示：MISSION COMPLETE 大字 + 最终分数 + 关卡编号 + REPLAY / MENU；
- * 视觉上与 GameOverOverlay 保持结构一致，只用金色（hud-accent）替代红色，
- * 让"结束"与"通关"通过颜色一眼可辨。REPLAY 复用 handleRetry：回首关 + 清 session。
- */
-function GameCompleteOverlay({
-  info,
-  onRetry,
-}: {
-  info: { finalScore: number; finalStageId: number }
-  onRetry: () => void
-}) {
-  return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/90 font-pixel text-white">
-      <p className="text-pixel-2xl text-hud-accent">MISSION</p>
-      <p className="text-pixel-2xl text-hud-accent">COMPLETE</p>
-      <p className="mt-4 animate-blink text-pixel-sm text-hud-accent">
-        ALL {TOTAL_STAGES} STAGES CLEARED
-      </p>
-      <p className="mt-4 text-pixel-lg">
-        FINAL <span className="text-hud-accent">{info.finalScore.toString().padStart(6, '0')}</span>
-      </p>
-      <p className="mt-1 text-pixel-sm text-outline">
-        LAST STAGE {info.finalStageId.toString().padStart(2, '0')}
-      </p>
-      <div className="mt-6 flex gap-3">
-        <button
-          type="button"
-          onClick={onRetry}
-          className="border-2 border-outline px-4 py-2 font-pixel text-pixel-sm text-hud-accent hover:bg-outline/30"
-        >
-          REPLAY
-        </button>
-        <a
-          href="#/"
-          className="border-2 border-outline px-4 py-2 font-pixel text-pixel-sm text-white hover:bg-outline/30"
-        >
-          MENU
-        </a>
-      </div>
-    </div>
   )
 }

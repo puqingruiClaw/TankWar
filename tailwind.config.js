@@ -97,12 +97,17 @@ export default {
           '0%': { transform: 'translateY(-100%)' },
           '100%': { transform: 'translateY(100%)' },
         },
+        'game-over-rise': {
+          '0%': { transform: 'translateY(60%)', opacity: '0' },
+          '100%': { transform: 'translateY(0)', opacity: '1' },
+        },
       },
       animation: {
         blink: 'blink 1s steps(1, end) infinite',
         'blink-fast': 'blink 400ms steps(1, end) infinite',
         'pixel-pulse': 'pixel-pulse 1.2s ease-in-out infinite',
         scanline: 'scanline 8s linear infinite',
+        'game-over-rise': 'game-over-rise 1s ease-out both',
       },
     },
   },
