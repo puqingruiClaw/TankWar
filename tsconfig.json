@@ -18,6 +18,7 @@
     "noFallthroughCasesInSwitch": false,
     "noUncheckedSideEffectImports": false,
     "forceConsistentCasingInFileNames": false,
+    "types": ["vitest/globals"],
     "baseUrl": "./",
     "paths": {
       "@/*": ["./src/*"]
