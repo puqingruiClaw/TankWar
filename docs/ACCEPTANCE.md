@@ -2,9 +2,9 @@
 
 > T-27 交付物之一。本清单把 PRD 与 schedule-and-roles 里散落的验收标准拉平成一份**逐项可勾选**的表，每一条右侧标注"依据"（对应的代码 / 文档 / 命令），供 PM 与验收方核对。
 
-- **仓库**：`main` 分支 HEAD `19ed371`（含）以后
+- **仓库**：`main` 分支，Git tag `v1.0.0`
 - **验收命令一键跑**：`pnpm verify`（即 `format:check → lint → check → test → build`，见 [package.json](../package.json)）
-- **验收日期**：2026-07-28
+- **验收日期**：2026-07-29
 
 ---
 
@@ -93,7 +93,7 @@
 | D2 | 源码仓库（README + 脚本 `dev/build/test/lint`） | ✅ | [package.json](../package.json) `scripts` |
 | D3 | 5 张可玩关卡 | ✅ | [levels.ts](../src/game/maps/levels.ts) `TOTAL_STAGES=5` |
 | D4 | 中文/英文操作说明 | ✅ | [HelpPage.tsx](../src/pages/HelpPage.tsx) + [README.md §2](../README.md) |
-| D5 | 演示视频（≤ 2 分钟） | ✅ | 脚本见 [DEMO-SCRIPT.md](./DEMO-SCRIPT.md)；录屏产物 `docs/demo.mp4` 归 PM 上传 |
+| D5 | 演示视频（≤ 2 分钟） | ➖ | v1.0 不随附录屏；[DEMO-SCRIPT.md](./DEMO-SCRIPT.md) 保留手动重现步骤，未来若补录会以补丁 Release 回填 |
 
 ---
 
@@ -115,10 +115,10 @@
 - **功能**：F1–F4 全通过（共 21 条）。
 - **性能**：P1–P6 全达标（bundle 仅占预算 16.4%）。
 - **兼容**：C1–C4 全通过；C5 已在 [README §8 路线图](../README.md) 记录为 v1.1 候选。
-- **交付**：D1–D5 全就绪；录屏按 [DEMO-SCRIPT.md](./DEMO-SCRIPT.md) 执行。
+- **交付**：D1–D4 全就绪；D5 演示视频本版本不随附，脚本 [DEMO-SCRIPT.md](./DEMO-SCRIPT.md) 可作手动重现向导。
 - **质量**：Q1–Q6 全绿。
 
-**结论**：v1.0 满足 PRD 全部核心 DoD，具备对外发布条件。
+**结论**：v1.0.0 满足 PRD 全部核心 DoD 与工程质量守门，具备对外发布条件；发布 Git tag `v1.0.0` 已推送至 origin。
 
 ---
 

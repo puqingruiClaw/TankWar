@@ -1,11 +1,11 @@
 # TankWar v1.0 · Release Notes
 
-**发布日期**：2026-07-28
-**版本**：v1.0
-**Commit**：`19ed371`（`main`）
+**发布日期**：2026-07-29
+**版本**：v1.0.0（Git tag `v1.0.0`）
+**发布 Commit**：`main` HEAD（打 tag 时锁定，见 `git show v1.0.0`）
 **Bundle 大小**：256.68 KB / **81.99 KB gzip**（占 500 KB 预算 16.4%）
 **测试**：Vitest 52/52 passed
-**演示**：见 [DEMO-SCRIPT.md](./DEMO-SCRIPT.md)（2 分钟录屏脚本）
+**演示视频**：本版本不随附录屏；[DEMO-SCRIPT.md](./DEMO-SCRIPT.md) 内的分镜头脚本亦可作为**手动重现玩法**的向导，后续版本若补录会以补丁 Release 形式回填链接。
 
 ---
 
