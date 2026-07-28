@@ -137,6 +137,23 @@ src/
 - v1.1（候选）：Bullet/Explosion 对象池、mobile viewport 缩放、Accessibility 92 → 100
 - v1.2（候选）：可配置键位（当前 Help 页说明 "SETTINGS PAGE PLANNED FOR A LATER RELEASE."）
 
-## 9. 许可
+## 9. 验收与录屏
+
+v1.0 交付时随附三份 T-27 文档，供 PM 与验收方核对：
+
+- [ACCEPTANCE.md](./docs/ACCEPTANCE.md) —— 功能 / 性能 / 兼容 / 交付四大块共 40+ 条可勾选检查项，每项标注满足依据（源文件、命令或报告）
+- [DEMO-SCRIPT.md](./docs/DEMO-SCRIPT.md) —— 2 分钟演示视频的分镜头脚本、旁白与录制注意事项
+- [RELEASE-NOTES-v1.0.md](./docs/RELEASE-NOTES-v1.0.md) —— 五大亮点、里程碑地图、成绩单、部署一键跑与已知限制
+- [COMPAT-PERF-REPORT.md](./docs/COMPAT-PERF-REPORT.md) —— 三大浏览器手动矩阵 + Lighthouse 预算对齐
+
+一键复现验收：
+
+```bash
+pnpm install --frozen-lockfile
+pnpm verify          # format:check → lint → check → test → build 一次跑齐
+pnpm preview         # http://localhost:4173/ 跟着 DEMO-SCRIPT 手动走一遍
+```
+
+## 10. 许可
 
 MIT（或按项目实际决定，本仓库当前不含 LICENSE 文件，发布前请补齐）。
