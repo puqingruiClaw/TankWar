@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import StageLayout from '@/layouts/StageLayout'
 import GameCanvas from '@/components/GameCanvas'
 import GameHUD from '@/components/GameHUD'
@@ -7,6 +8,7 @@ import {
   type GameCompleteInfo,
   GameOverOverlay,
   type GameOverInfo,
+  NameEntryOverlay,
   PauseOverlay,
   StageClearOverlay,
   type StageClearInfo,
@@ -15,6 +17,7 @@ import { PLAYER_INITIAL_LIVES, STAGE_CLEAR_DURATION } from '@/game/constants'
 import { DEFAULT_LEVEL, LEVELS } from '@/game/maps/levels'
 import type { EngineStats } from '@/game/GameEngine'
 import type { InputIntent, LevelDefinition, PowerUpKind, Tank } from '@/game/types'
+import { insert as insertLeaderboard, qualifies, save as saveLeaderboard } from '@/lib/leaderboard'
 
 /**
  * PlayPage —— T-12 起把"单纯战场画布"升级成完整的一局；T-15 起打通
@@ -188,7 +191,56 @@ export default function PlayPage() {
     setLives(PLAYER_INITIAL_LIVES)
     setScore(0)
     setPhase('playing')
+    setPendingRecord(null)
   }, [])
+
+  /**
+   * T-21：破纪录判定 & 昵称录入闸门。
+   *
+   * 一局结束（game-over / game-complete）进入 phase 的瞬间，判定当前 score
+   * 是否入 Top10；若是则挂出 [NameEntryOverlay](file:///Users/puqingrui/workspace/Projects/TankWar/src/components/overlays/NameEntryOverlay.tsx)
+   * 遮住 GameOver/Complete 覆盖层，等待玩家键盘输入 3 字母；提交后调用
+   * [insertLeaderboard](file:///Users/puqingrui/workspace/Projects/TankWar/src/lib/leaderboard.ts#L112-L136) 落库并跳转到
+   * /leaderboard?rank=N 让新条目闪烁高亮。
+   *
+   * 使用 `pendingRecord` 而不是布尔 —— 记录下"当时那局的分数/关卡"，避免
+   * NameEntry 组件跟 PlayPage 的实时 score/level 产生同步问题。
+   */
+  const [pendingRecord, setPendingRecord] = useState<{ score: number; stageId: number } | null>(
+    null,
+  )
+  const navigate = useNavigate()
+
+  useEffect(() => {
+    if (phase === 'game-over' && gameOverInfo && qualifies(gameOverInfo.score)) {
+      setPendingRecord({ score: gameOverInfo.score, stageId: gameOverInfo.stageId })
+    } else if (
+      phase === 'game-complete' &&
+      gameCompleteInfo &&
+      qualifies(gameCompleteInfo.finalScore)
+    ) {
+      setPendingRecord({
+        score: gameCompleteInfo.finalScore,
+        stageId: gameCompleteInfo.finalStageId,
+      })
+    }
+  }, [phase, gameOverInfo, gameCompleteInfo])
+
+  const handleNameSubmit = useCallback(
+    (name: string) => {
+      if (!pendingRecord) return
+      const { rank, list } = insertLeaderboard({
+        name,
+        score: pendingRecord.score,
+        stage: pendingRecord.stageId,
+        createdAt: Date.now(),
+      })
+      saveLeaderboard(list)
+      setPendingRecord(null)
+      navigate(rank > 0 ? `/leaderboard?rank=${rank}` : '/leaderboard')
+    },
+    [pendingRecord, navigate],
+  )
 
   const enemiesLeft = enemies.field + enemies.queue
   const subtitle = useMemo(() => {
@@ -234,6 +286,13 @@ export default function PlayPage() {
           )}
           {phase === 'game-complete' && gameCompleteInfo && (
             <GameCompleteOverlay info={gameCompleteInfo} onRetry={handleRetry} />
+          )}
+          {pendingRecord && (phase === 'game-over' || phase === 'game-complete') && (
+            <NameEntryOverlay
+              score={pendingRecord.score}
+              stageId={pendingRecord.stageId}
+              onSubmit={handleNameSubmit}
+            />
           )}
         </div>
 
