@@ -67,6 +67,8 @@ if (ENEMY_QUEUE.length !== ENEMIES_PER_STAGE) {
 export const STAGE_01: LevelDefinition = {
   id: 1,
   name: 'STAGE 01',
+  tag: 'CLASSIC',
+  hint: 'MOVE WITH WASD, FIRE WITH J',
   map: MAP,
   enemyQueue: ENEMY_QUEUE,
 }

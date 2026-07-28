@@ -10,7 +10,7 @@ import {
   TANK_COOLDOWN,
   TILE_SIZE,
 } from '@/game/constants'
-import { DEFAULT_LEVEL, LEVELS, TOTAL_STAGES } from '@/game/maps/levels'
+import { DEFAULT_LEVEL, LEVELS, STAGE_HINTS, TOTAL_STAGES } from '@/game/maps/levels'
 import type { EngineStats } from '@/game/GameEngine'
 import type { InputIntent, LevelDefinition, Tank } from '@/game/types'
 
@@ -274,6 +274,15 @@ export default function PlayPage() {
                 / {TOTAL_STAGES.toString().padStart(2, '0')}
               </span>
             </p>
+            {level.tag && (
+              <p className="mt-1 font-pixel text-pixel-sm text-hud-accent">{level.tag}</p>
+            )}
+            {STAGE_HINTS[level.id] && (
+              <p className="mt-1 font-pixel text-pixel-sm text-white leading-snug">
+                <span className="text-outline">HINT </span>
+                {STAGE_HINTS[level.id]}
+              </p>
+            )}
           </div>
 
           <div className="mt-4 border-t border-outline pt-2">

@@ -2,21 +2,27 @@ import { ENEMIES_PER_STAGE } from '../constants'
 import type { EnemyKind, LevelDefinition, LevelMap } from '../types'
 
 /**
- * STAGE 05 —— "钢铁堡垒"（Iron Fortress） · 一周目终关
+ * STAGE 05 —— "IRON FORTRESS" 钢铁堡垒 · 一周目终关
  *
  * 主题：地图布满钢墙（2）+ 砖墙（1）构成的"米字形"迷宫，只有 power
  * 才能穿透钢墙。基地被 3×3 的钢墙 + 砖墙嵌套保护，但北方留出一条
  * 双砖厚的"献祭通道"—— 玩家守住这条通道就能守住基地。
  *
- * 敌军队列难度：终关强度 —— armor(8) + power(8) + fast(4)，无 basic。
- * armor 需要 400 分击破且血厚，power 打钢墙也高伤，玩家必须充分利用
- * 冰道的滑行 + 钢墙掩体走位。
+ * 教学意图：终关综合考核。冰道走位、钢墙掩体、armor 集火、power 秒杀
+ * 全部同时出现；basic 完全消失、fast 只保留 2 只做变速搅局，玩家没有
+ * "混子"能打，每一发子弹都要有目的。
  *
- * 约束校验：
- * - 敌军出生点 (0,0)/(6,0)/(12,0) 均为 0；
- * - 玩家出生点 (4,12)/(8,12) 均为 0；
- * - 基地 (6,12) = 9；周边 (5,12)/(7,12)/(5,11)/(6,11)/(7,11) 均为 brick；
- * - 外圈再套一层钢墙 (5,10)/(6,10)/(7,10) 提升守家难度。
+ * 难度曲线（T-16）：fast 2 + armor 8 + power 10 = 20。power 首次成为
+ * 主力（50%），坦克血基本上 4~5 发才能打穿一层砖，玩家守家节奏必须
+ * 缩短到 2 秒内响应。
+ *
+ * 队列节奏：开局 fast 打乱阵型，紧接着 armor/power 密集轰炸；末尾
+ * 4 台 armor→power 是"最后 20 秒"极限压力，也是通关判定的高潮点。
+ *
+ * 约束（validateLevel 会强制校验）：
+ * - 敌军出生点 (0,0)/(6,0)/(12,0)、玩家出生点 (4,12)/(8,12) 均为 0；
+ * - 基地 (6,12)=9 且全图唯一；周边多层钢墙 + 砖墙嵌套保护；
+ * - 三条 spawn 列均可通过绕行 / 打通砖墙抵达 base（power 能打钢）。
  */
 
 // prettier-ignore
@@ -47,12 +53,12 @@ const ENEMY_QUEUE = [
   'power',
   'armor',
   'power',
-  'fast',
-  'armor',
   'power',
   'armor',
   'power',
-  'fast',
+  'armor',
+  'power',
+  'power',
   'armor',
   'power',
   'armor',
@@ -68,6 +74,8 @@ if (ENEMY_QUEUE.length !== ENEMIES_PER_STAGE) {
 export const STAGE_05: LevelDefinition = {
   id: 5,
   name: 'STAGE 05',
+  tag: 'IRON FORTRESS',
+  hint: 'FINAL STAGE. KILL POWERS FIRST OR LOSE BASE',
   map: MAP,
   enemyQueue: ENEMY_QUEUE,
 }

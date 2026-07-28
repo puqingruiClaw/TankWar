@@ -109,6 +109,16 @@ export interface LevelDefinition {
   map: LevelMap
   /** 该关敌军类型序列（长度需等于 ENEMIES_PER_STAGE）。*/
   enemyQueue: readonly EnemyKind[]
+  /**
+   * 关卡玩法主题标签（≤ 12 字），HUD / stage-intro 展示用。可选。
+   * 示例："STEEL CORRIDOR" / "FROZEN LAKE"。
+   */
+  tag?: string
+  /**
+   * 一句话玩法提示（≤ 40 字），面向"这关想教你什么"的引导话术。可选。
+   * 示例："lv<3 打不穿钢墙，注意侧翼"。
+   */
+  hint?: string
 }
 
 // ─── 游戏状态 ────────────────────────────────────────────────────────────────
