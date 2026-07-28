@@ -150,13 +150,48 @@ export const ENEMY_SPAWN_INTERVAL = 3
 /** AI 决策间隔（秒），避免每帧重算 FSM。*/
 export const AI_DECISION_INTERVAL = 0.5
 
-// ─── 道具 ────────────────────────────────────────────────────────────────────
+// ─── 道具（T-17） ────────────────────────────────────────────────────────────
+// 6 种道具（对齐 PRD 4.1 + [PowerUpKind](./types.ts#L85-L85)）：
+//   star   → 玩家 level +1（0→3 封顶）
+//   helmet → 玩家 10s 无敌
+//   bomb   → 立刻清屏场上所有敌军（不计分，红白机原版规则）
+//   shovel → 基地周围 8 格砖变钢，持续 15s 后还原
+//   clock  → 敌军冻结 10s（AI 决策 + Movement 全部暂停）
+//   tank   → 玩家 +1 命
+// 每次拾取额外获得 [POWERUP_PICKUP_SCORE](#L188-L189) 分。
 
-/** 每关最多出现的道具数量。*/
+/** 每关最多同时出现在场上的道具数量。 */
 export const MAX_POWERUPS_ON_FIELD = 1
 
-/** 道具停留时间（秒）；超时自动消失。*/
+/** 道具停留时间（秒）；超时自动消失。 */
 export const POWERUP_LIFETIME = 10
+
+/** 玩家火力等级上限（0 基础 / 1 快速 / 2 双弹 / 3 打钢）。 */
+export const POWERUP_STAR_MAX_LEVEL = 3
+
+/** helmet 提供的无敌时长（秒）。 */
+export const POWERUP_HELMET_DURATION = 10
+
+/** clock 冻结敌军的时长（秒）。 */
+export const POWERUP_CLOCK_DURATION = 10
+
+/** shovel 把基地周围砖变钢的持续时长（秒），到期还原为砖。 */
+export const POWERUP_SHOVEL_DURATION = 15
+
+/** shovel 到期前多少秒开始"闪烁提示"，让玩家知道钢墙即将失效。 */
+export const POWERUP_SHOVEL_WARN = 3
+
+/** tank 道具带来的额外生命数。 */
+export const POWERUP_TANK_LIFE_GAIN = 1
+
+/** 每次拾取道具的加分（红白机原版 = 500）。 */
+export const POWERUP_PICKUP_SCORE = 500
+
+/**
+ * 每关"会掉道具的敌军"数量（红白机原版：每关有 4 只闪烁敌军，击杀即掉）。
+ * 简化版：每关随机选中 N 只敌军刷序号，击杀命中则 spawn。
+ */
+export const POWERUP_BONUS_ENEMY_COUNT = 4
 
 // ─── 输入默认键位（可被 settingsStore 覆盖） ─────────────────────────────────
 
@@ -276,4 +311,18 @@ export const PALETTE = {
     baseDeadHi: '#d9d9d9',
   },
   bullet: '#ffffff',
+  /**
+   * T-17：道具调色板。6 种 kind 各一主色 + 通用金框（frame）+ 白色高光（hi）。
+   * 与 Tailwind 无对应关系（道具只在 canvas 内绘制），修改无需同步。
+   */
+  powerup: {
+    frame: '#e6e62e',
+    hi: '#ffffff',
+    star: '#ffe066',
+    helmet: '#8ee8ff',
+    bomb: '#ff5555',
+    shovel: '#f2b431',
+    clock: '#ffffff',
+    tank: '#3ab34a',
+  },
 } as const

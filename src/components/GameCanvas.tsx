@@ -35,15 +35,19 @@ import {
   BASE_POSITION,
   CANVAS_HEIGHT,
   CANVAS_WIDTH,
+  ENEMIES_PER_STAGE,
   ENEMY_MAX_BULLETS,
   GAME_OVER_DELAY,
+  MAX_POWERUPS_ON_FIELD,
   PLAYER_INITIAL_LIVES,
   PLAYER_MAX_BULLETS,
   PLAYER_RESPAWN_INVULNERABLE,
+  POWERUP_BONUS_ENEMY_COUNT,
   SCORE_TABLE,
   TANK_COOLDOWN,
 } from '@/game/constants'
 import { canTankFire, createBullet } from '@/game/entities/Bullet'
+import { createPowerUp, pickPowerUpKind, pickPowerUpSpawnCell } from '@/game/entities/PowerUp'
 import { createPlayerTank, isEnemyTank } from '@/game/entities/Tank'
 import { DEFAULT_LEVEL } from '@/game/maps/levels'
 import { pruneAIMemory, resetAIMemory, stepEnemyAI } from '@/game/systems/AISystem'
@@ -53,6 +57,15 @@ import {
   stepBullets,
 } from '@/game/systems/CollisionSystem'
 import { updateTank } from '@/game/systems/MovementSystem'
+import {
+  applyPowerUpEffect,
+  detectPickup,
+  prunePowerUps,
+  stepPowerUps,
+  tickFreezeTimer,
+  tickShovelTimer,
+} from '@/game/systems/PowerUpSystem'
+import type { PowerUpSessionState } from '@/game/systems/PowerUpSystem'
 import { RenderSystem } from '@/game/systems/RenderSystem'
 import { SpawnManager, countAliveEnemies, pruneDeadEnemies } from '@/game/systems/SpawnManager'
 import { createRng } from '@/game/utils/rng'
@@ -67,7 +80,10 @@ import type {
   Explosion,
   InputIntent,
   LevelDefinition,
+  PowerUp,
+  PowerUpKind,
   Tank,
+  TileCode,
 } from '@/game/types'
 
 /** 关卡结算时向外冒泡的击杀分类计数。key 与 [EnemyKind](../game/types.ts#L55-L55) 对齐。 */
@@ -91,6 +107,18 @@ interface GameCanvasProps {
   onScoreChange?: (score: number) => void
   /** 玩家剩余生命（含当前场上正在使用的这条）。 */
   onLivesChange?: (lives: number) => void
+  /**
+   * T-17：场上道具 & 活跃 buff 变化。null 表示当前场上无道具；三个 buff 剩余秒
+   * 用于 HUD 顶部的 POWER-UP 面板绘制进度条。
+   */
+  onPowerUpChange?: (info: {
+    field: { kind: PowerUpKind; lifetime: number } | null
+    freezeTimer: number
+    shovelTimer: number
+    helmetTimer: number
+    playerLevel: number
+    collected: number
+  }) => void
   /** 达成通关条件：本关 20 台敌军全灭（含队列耗尽）。 */
   onStageCleared?: (info: { killByKind: KillByKind; score: number; stageId: number }) => void
   /** 结束一局：基地被毁 or lives 归零。 */
@@ -178,7 +206,7 @@ let localExplosionId = 1_000_000
  * 会话级状态：跨关卡持续存在，只在 [resetSessionKey](#L100-L104) 变更时清零。
  * 生命初始 = PLAYER_INITIAL_LIVES；每次击杀累加 score 与 killByKind。
  */
-interface SessionState {
+interface SessionState extends PowerUpSessionState {
   lives: number
   score: number
   killByKind: KillByKind
@@ -198,6 +226,12 @@ interface SessionState {
    * null 表示当前无待发的 game-over。
    */
   pendingGameOverReason: GameOverReason | null
+  /**
+   * T-17：本关"会掉道具的敌军刷序号"集合（从 [0, ENEMIES_PER_STAGE) 中抽 4 只）。
+   * 每关初始化时由 [pickBonusEnemyIndices](#L235-L245) 生成；敌军被击杀且
+   * spawnedIndex 命中此集合时触发一次道具生成。
+   */
+  bonusEnemyIndices: Set<number>
 }
 
 function createInitialSession(): SessionState {
@@ -210,7 +244,33 @@ function createInitialSession(): SessionState {
     gameOverFired: false,
     gameOverCountdown: 0,
     pendingGameOverReason: null,
+    freezeTimer: 0,
+    shovelTimer: 0,
+    shovelBackup: new Map<string, TileCode>(),
+    powerUpsCollected: 0,
+    bonusEnemyIndices: new Set<number>(),
   }
+}
+
+/**
+ * 从 [0, ENEMIES_PER_STAGE) 中抽取 [POWERUP_BONUS_ENEMY_COUNT](../game/constants.ts#L194)
+ * 个不重复整数，作为"击杀掉道具"的敌军刷新序号。
+ *
+ * 简化版红白机规则：原版每关有 4 只"闪烁敌军"，击杀即掉道具；本项目还没做
+ * 闪烁纹理，先在数据层做正确即可，未来接入闪烁纹理时只需在 RenderSystem
+ * 消费同一个 bonusEnemyIndices 即可。
+ */
+function pickBonusEnemyIndices(rng: ReturnType<typeof createRng>): Set<number> {
+  const pool: number[] = []
+  for (let i = 0; i < ENEMIES_PER_STAGE; i++) pool.push(i)
+  const set = new Set<number>()
+  const n = Math.min(POWERUP_BONUS_ENEMY_COUNT, pool.length)
+  for (let i = 0; i < n; i++) {
+    const idx = rng.int(0, pool.length)
+    set.add(pool[idx])
+    pool.splice(idx, 1)
+  }
+  return set
 }
 
 export default function GameCanvas({
@@ -223,6 +283,7 @@ export default function GameCanvas({
   onBaseHit,
   onScoreChange,
   onLivesChange,
+  onPowerUpChange,
   onStageCleared,
   onGameOver,
   phase = 'playing',
@@ -238,6 +299,20 @@ export default function GameCanvas({
   const enemiesRef = useRef<Tank[]>([])
   const bulletsRef = useRef<Bullet[]>([])
   const explosionsRef = useRef<Explosion[]>([])
+  const powerUpsRef = useRef<PowerUp[]>([])
+  /**
+   * T-17：本关"截至目前已刷出的敌军累计计数"。用来跟本关抽签集
+   * `sessionRef.current.bonusEnemyIndices` 匹配（0-based；等于 spawnedEnemyCount-1
+   * 的敌军就是当前这只）。
+   */
+  const spawnedEnemyCountRef = useRef(0)
+  /**
+   * T-17：敌军 id → 该敌军在本关的 spawnIndex（0-based）。
+   * 击杀时按 id 反查，命中 bonusEnemyIndices 即掉道具。
+   * 敌军消亡（pruneDeadEnemies）时不清理也无碍，最多多占一点内存 —— 切关时随
+   * softResetForLevel 一并 clear。
+   */
+  const enemySpawnIndexRef = useRef<Map<EntityId, number>>(new Map())
   // 关卡地图会被子弹击中砖块修改，因此需要深拷贝一份到 ref。
   const mapRef = useRef<LevelDefinition['map']>(level.map.map((row) => [...row]))
   const spawnerRef = useRef<SpawnManager>(new SpawnManager({ queue: level.enemyQueue }))
@@ -251,6 +326,7 @@ export default function GameCanvas({
     onBaseHit,
     onScoreChange,
     onLivesChange,
+    onPowerUpChange,
     onStageCleared,
     onGameOver,
   })
@@ -259,10 +335,11 @@ export default function GameCanvas({
       onBaseHit,
       onScoreChange,
       onLivesChange,
+      onPowerUpChange,
       onStageCleared,
       onGameOver,
     }
-  }, [onBaseHit, onScoreChange, onLivesChange, onStageCleared, onGameOver])
+  }, [onBaseHit, onScoreChange, onLivesChange, onPowerUpChange, onStageCleared, onGameOver])
 
   /**
    * 复活玩家：把 tankRef 换成"新出生的玩家坦克"，保留 id 演进（不是必须，
@@ -279,9 +356,13 @@ export default function GameCanvas({
    */
   const hardResetWorld = useCallback(() => {
     sessionRef.current = createInitialSession()
+    sessionRef.current.bonusEnemyIndices = pickBonusEnemyIndices(rngRef.current)
     enemiesRef.current = []
     bulletsRef.current = []
     explosionsRef.current = []
+    powerUpsRef.current = []
+    spawnedEnemyCountRef.current = 0
+    enemySpawnIndexRef.current.clear()
     mapRef.current = level.map.map((row) => [...row])
     spawnerRef.current = new SpawnManager({ queue: level.enemyQueue })
     resetAIMemory()
@@ -296,6 +377,9 @@ export default function GameCanvas({
     enemiesRef.current = []
     bulletsRef.current = []
     explosionsRef.current = []
+    powerUpsRef.current = []
+    spawnedEnemyCountRef.current = 0
+    enemySpawnIndexRef.current.clear()
     mapRef.current = level.map.map((row) => [...row])
     spawnerRef.current = new SpawnManager({ queue: level.enemyQueue })
     resetAIMemory()
@@ -304,6 +388,11 @@ export default function GameCanvas({
     s.stageStarted = false
     s.stageClearFired = false
     s.gameOverCountdown = 0
+    // T-17：切关时清掉可能残留的 buff & 备份，重新抽签本关的"掉道具敌军"。
+    s.freezeTimer = 0
+    s.shovelTimer = 0
+    s.shovelBackup.clear()
+    s.bonusEnemyIndices = pickBonusEnemyIndices(rngRef.current)
     // gameOverFired 保持：整局层面它由 hardResetWorld 清；这里只重置本关标志。
   }, [level, respawnPlayer])
 
@@ -332,6 +421,7 @@ export default function GameCanvas({
       const enemies = enemiesRef.current
       const bullets = bulletsRef.current
       const explosions = explosionsRef.current
+      const powerUps = powerUpsRef.current
       const map = mapRef.current
       const rng = rngRef.current
       const session = sessionRef.current
@@ -355,16 +445,31 @@ export default function GameCanvas({
         dt,
       })
       if (spawnResult.spawned.length > 0) {
+        for (const e of spawnResult.spawned) {
+          // T-17：记录该敌军在本关的刷序（0-based）。命中 bonusEnemyIndices 即掉道具。
+          enemySpawnIndexRef.current.set(e.id, spawnedEnemyCountRef.current)
+          spawnedEnemyCountRef.current += 1
+        }
         enemies.push(...spawnResult.spawned)
         session.stageStarted = true
       }
 
       // 4) 敌军 AI：FSM 决策 → 移动 + 开火（T-11）
+      //    T-17：session.freezeTimer > 0 时敌军全部冻结（AI 不决策、Movement 不推进、
+      //    也不开火）；但已在空中的子弹继续飞行，红白机原版规则如此。
       const isBaseAlive = tileTypeAt(map, BASE_POSITION.col, BASE_POSITION.row) === 'base'
       const aliveEnemyIds = new Set<EntityId>()
+      const enemiesFrozen = session.freezeTimer > 0
       for (const e of enemies) {
         if (!e.alive) continue
         aliveEnemyIds.add(e.id)
+        if (enemiesFrozen) {
+          // 冻结期间仍要衰减 invulnerable / cooldown 等 tank 内部计时器？
+          // 红白机原版：clock 期间敌军完全"石化"（包括冷却也不走）。这里为了不
+          // 打破 [updateTank](../game/systems/MovementSystem.ts#L136-L162) 的
+          // 内部 tick 语义，选择整段跳过；冷却/无敌到期也算作"石化保护"。
+          continue
+        }
         const aiIntent = stepEnemyAI(map, e, dt, {
           player: tank,
           basePos: isBaseAlive ? BASE_POSITION : null,
@@ -381,10 +486,16 @@ export default function GameCanvas({
       }
       pruneAIMemory(aliveEnemyIds)
 
+      // T-17：每帧衰减两个全局计时器。shovel 到期会就地把钢墙还原为原始 tile。
+      tickFreezeTimer(session, dt)
+      tickShovelTimer(map, session, dt)
+
       // 5) 推进子弹 & 命中判定。
       //    T-12 起接入 onEnemyKilled / onPlayerKilled：
       //    - 敌军死亡 → 累加 score + killByKind
       //    - 玩家死亡 → lives--，若还有命则下一帧 respawn；若归零则倒计时 game-over
+      //    T-17：敌军被击杀且刷序命中本关 bonusEnemyIndices 时 spawn 道具（受
+      //    MAX_POWERUPS_ON_FIELD 限制；已满则跳过本次掉落）。
       stepBullets({
         map,
         bullets,
@@ -408,6 +519,22 @@ export default function GameCanvas({
             session.killByKind[kind] = (session.killByKind[kind] ?? 0) + 1
             session.score += SCORE_TABLE[kind]
             callbacksRef.current.onScoreChange?.(session.score)
+
+            // T-17：道具掉落判定。
+            const spawnIdx = enemySpawnIndexRef.current.get(killed.id)
+            if (
+              spawnIdx !== undefined &&
+              session.bonusEnemyIndices.has(spawnIdx) &&
+              powerUps.filter((p) => p.alive).length < MAX_POWERUPS_ON_FIELD
+            ) {
+              const cell = pickPowerUpSpawnCell(map, rng, powerUps)
+              if (cell) {
+                const kindDropped = pickPowerUpKind(rng)
+                powerUps.push(createPowerUp(kindDropped, cell.col, cell.row))
+                // 只 spawn 一次，防止同一格连续中签导致重复掉落。
+                session.bonusEnemyIndices.delete(spawnIdx)
+              }
+            }
           },
           onPlayerKilled: () => {
             session.lives = Math.max(0, session.lives - 1)
@@ -422,11 +549,51 @@ export default function GameCanvas({
           },
         },
       })
+
+      // 6) T-17：道具生命衰减 & 拾取。
+      //    - stepPowerUps：每帧衰减 lifetime，超时自动 alive=false；
+      //    - detectPickup：玩家 rect 相交即拾取（一帧最多一个道具，够用）；
+      //    - applyPowerUpEffect：分发 6 类效果，bomb 的清屏结果转成爆炸特效。
+      stepPowerUps(powerUps, dt)
+      const picked = detectPickup(powerUps, tank)
+      if (picked) {
+        picked.alive = false
+        const effect = applyPowerUpEffect(picked.kind, {
+          player: tank,
+          enemies,
+          map,
+          session,
+        })
+        session.score += effect.scoreDelta
+        callbacksRef.current.onScoreChange?.(session.score)
+        // bomb 清屏的敌军：算入 killByKind（用于结算），但不加分（原版规则）。
+        for (const victim of effect.bombVictims) {
+          if (!isEnemyTank(victim)) continue
+          const vkind = victim.kind as EnemyKind
+          session.killByKind[vkind] = (session.killByKind[vkind] ?? 0) + 1
+          const cx = victim.x + victim.w / 2
+          const cy = victim.y + victim.h / 2
+          spawnExplosion(explosions, () => ++localExplosionId, cx, cy, 'tank')
+        }
+        // 拾取本身的视觉反馈：一次小爆炸。
+        spawnExplosion(
+          explosions,
+          () => ++localExplosionId,
+          picked.x + picked.w / 2,
+          picked.y + picked.h / 2,
+          'bullet',
+        )
+        // tank 道具变更了 lives；helmet 变更了玩家 invulnerable；star 变更了 level。
+        // 全部走一次 onLivesChange，让 HUD 及时更新（onPowerUpChange 也会推送）。
+        if (picked.kind === 'tank') callbacksRef.current.onLivesChange?.(session.lives)
+      }
+
       pruneDeadBullets(bullets)
       pruneDeadEnemies(enemies)
+      prunePowerUps(powerUps)
       stepExplosions(explosions, dt)
 
-      // 6) 终局判定 —— 每帧检查一次，防止漏发。
+      // 7) 终局判定 —— 每帧检查一次，防止漏发。
       //    stage-clear：本关队列耗尽 + 场上无存活敌军 + session.stageStarted。
       if (
         !session.stageClearFired &&
@@ -476,10 +643,12 @@ export default function GameCanvas({
       renderSystem.drawBackground(ctx)
       renderSystem.drawTerrainBelow(ctx, map)
 
-      // Layer 2: 玩家 + 敌军 + 子弹 + 爆炸
+      // Layer 2: 玩家 + 敌军 + 子弹 + 道具 + 爆炸
       renderSystem.drawTank(ctx, tankRef.current)
       for (const e of enemiesRef.current) renderSystem.drawTank(ctx, e)
       for (const b of bulletsRef.current) renderSystem.drawBullet(ctx, b)
+      // T-17：道具在坦克 & 子弹之上，但仍在草丛之下（更醒目 + 不干扰"草丛遮蔽"）。
+      for (const p of powerUpsRef.current) renderSystem.drawPowerUp(ctx, p)
       for (const e of explosionsRef.current) renderSystem.drawExplosion(ctx, e)
 
       // Layer 3: grass（在坦克之上）
@@ -505,7 +674,8 @@ export default function GameCanvas({
   }, [stats, onStats])
 
   useEffect(() => {
-    if (!onInput && !onTankChange && !onBulletsChange && !onEnemiesChange) return
+    if (!onInput && !onTankChange && !onBulletsChange && !onEnemiesChange && !onPowerUpChange)
+      return
     const id = window.setInterval(() => {
       onInput?.(lastIntentRef.current)
       onTankChange?.(tankRef.current)
@@ -522,9 +692,21 @@ export default function GameCanvas({
           totalSpawned: spawnerRef.current.totalSpawnedCount(),
         })
       }
+      if (onPowerUpChange) {
+        const alive = powerUpsRef.current.find((p) => p.alive) ?? null
+        const s = sessionRef.current
+        onPowerUpChange({
+          field: alive ? { kind: alive.kind, lifetime: alive.lifetime } : null,
+          freezeTimer: s.freezeTimer,
+          shovelTimer: s.shovelTimer,
+          helmetTimer: tankRef.current.invulnerable,
+          playerLevel: tankRef.current.level,
+          collected: s.powerUpsCollected,
+        })
+      }
     }, 100)
     return () => window.clearInterval(id)
-  }, [onInput, onTankChange, onBulletsChange, onEnemiesChange])
+  }, [onInput, onTankChange, onBulletsChange, onEnemiesChange, onPowerUpChange])
 
   return (
     <canvas

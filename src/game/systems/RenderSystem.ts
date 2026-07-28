@@ -17,8 +17,24 @@
  * 则永远在坦克之下。把 grass 抽成上层是最贴合语义、也最省状态的做法。
  */
 
-import { CANVAS_HEIGHT, CANVAS_WIDTH, PALETTE, TILE_CODE, TILE_SIZE } from '../constants'
-import type { Bullet, Direction, Explosion, LevelMap, Tank, TankKind } from '../types'
+import {
+  CANVAS_HEIGHT,
+  CANVAS_WIDTH,
+  PALETTE,
+  POWERUP_LIFETIME,
+  TILE_CODE,
+  TILE_SIZE,
+} from '../constants'
+import type {
+  Bullet,
+  Direction,
+  Explosion,
+  LevelMap,
+  PowerUp,
+  PowerUpKind,
+  Tank,
+  TankKind,
+} from '../types'
 
 export interface RenderSystemOptions {
   /** 调试用网格线（每 tile 一根 1px 深色线）；默认 false。 */
@@ -145,6 +161,25 @@ export class RenderSystem {
       ctx.fillRect(cx - s2, cy + s2 - 4, 4, 4)
       ctx.fillRect(cx + s2 - 4, cy + s2 - 4, 4, 4)
     }
+  }
+
+  /**
+   * 绘制单个道具（T-17）。
+   * - 尺寸固定 TILE_SIZE，绘制原点 (p.x, p.y)。
+   * - 剩余寿命 ≤ 3s 时以 8Hz 频率闪烁（提示玩家快消失）。
+   * - kind 决定内部图案，全部用 fillRect 拼像素，风格与坦克/地形一致。
+   */
+  drawPowerUp(ctx: CanvasRenderingContext2D, powerUp: PowerUp): void {
+    if (!powerUp.alive) return
+    // 剩余寿命提示：最后 3 秒 8Hz 闪烁。
+    const warn = powerUp.lifetime <= 3
+    if (warn) {
+      const phase = Math.floor(powerUp.lifetime * 8) % 2
+      if (phase === 1) return
+    }
+    // 呼吸感提示：常规期间也用 4Hz 让高光边有节奏地变化，避免道具"静如枯木"。
+    const breatheOn = Math.floor((POWERUP_LIFETIME - powerUp.lifetime) * 4) % 2 === 0
+    drawPowerUpSprite(ctx, powerUp.x, powerUp.y, powerUp.kind, breatheOn)
   }
 
   private drawGridLines(ctx: CanvasRenderingContext2D): void {
@@ -337,4 +372,151 @@ function drawTankSprite(
       ctx.fillRect(cx, cy - 2, S / 2 - 2, 4)
       break
   }
+}
+
+// ─── 道具绘制单元（T-17） ─────────────────────────────────────────────────────
+// 6 种 kind 各自的 32×32 像素图案。所有 kind 共享：
+//   1. 一圈金色外框（PALETTE.powerup.frame），呼吸态 on/off 决定是否绘制；
+//   2. 一个黑色底板，让内部图案在任意地形上都有足够对比度。
+// 内部主图案由各自的 drawPowerUp<Kind>() 完成。
+
+function drawPowerUpSprite(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  kind: PowerUpKind,
+  breatheOn: boolean,
+): void {
+  const S = TILE_SIZE
+  ctx.fillStyle = '#000000'
+  ctx.fillRect(x, y, S, S)
+  if (breatheOn) {
+    ctx.fillStyle = PALETTE.powerup.frame
+    ctx.fillRect(x, y, S, 2)
+    ctx.fillRect(x, y + S - 2, S, 2)
+    ctx.fillRect(x, y, 2, S)
+    ctx.fillRect(x + S - 2, y, 2, S)
+  }
+
+  switch (kind) {
+    case 'star':
+      drawStarIcon(ctx, x, y)
+      break
+    case 'helmet':
+      drawHelmetIcon(ctx, x, y)
+      break
+    case 'bomb':
+      drawBombIcon(ctx, x, y)
+      break
+    case 'shovel':
+      drawShovelIcon(ctx, x, y)
+      break
+    case 'clock':
+      drawClockIcon(ctx, x, y)
+      break
+    case 'tank':
+      drawTankIcon(ctx, x, y)
+      break
+  }
+}
+
+/** 五角星：底部四条外向像素 + 中心一小块高光。 */
+function drawStarIcon(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  const cx = x + TILE_SIZE / 2
+  const cy = y + TILE_SIZE / 2
+  ctx.fillStyle = PALETTE.powerup.star
+  ctx.fillRect(cx - 2, cy - 12, 4, 24)
+  ctx.fillRect(cx - 12, cy - 2, 24, 4)
+  ctx.fillRect(cx - 8, cy - 8, 4, 4)
+  ctx.fillRect(cx + 4, cy - 8, 4, 4)
+  ctx.fillRect(cx - 8, cy + 4, 4, 4)
+  ctx.fillRect(cx + 4, cy + 4, 4, 4)
+  ctx.fillStyle = PALETTE.powerup.hi
+  ctx.fillRect(cx - 2, cy - 2, 4, 4)
+}
+
+/** helmet：一顶头盔轮廓。上半圆 + 下颚条 + 左右耳罩。 */
+function drawHelmetIcon(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  const cx = x + TILE_SIZE / 2
+  const cy = y + TILE_SIZE / 2
+  ctx.fillStyle = PALETTE.powerup.helmet
+  // 头盔顶：14 宽 6 高。
+  ctx.fillRect(cx - 8, cy - 8, 16, 4)
+  ctx.fillRect(cx - 10, cy - 4, 20, 6)
+  // 下沿：中间凹一格模拟护目镜切割。
+  ctx.fillRect(cx - 10, cy + 2, 6, 4)
+  ctx.fillRect(cx + 4, cy + 2, 6, 4)
+  ctx.fillStyle = PALETTE.powerup.hi
+  ctx.fillRect(cx - 6, cy - 6, 4, 2)
+}
+
+/** bomb：一颗圆球 + 顶部导火索。 */
+function drawBombIcon(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  const cx = x + TILE_SIZE / 2
+  const cy = y + TILE_SIZE / 2
+  ctx.fillStyle = PALETTE.powerup.bomb
+  ctx.fillRect(cx - 8, cy - 4, 16, 12)
+  ctx.fillRect(cx - 6, cy - 8, 12, 4)
+  ctx.fillRect(cx - 10, cy - 2, 20, 8)
+  // 导火索
+  ctx.fillStyle = '#f2b431'
+  ctx.fillRect(cx - 1, cy - 12, 2, 4)
+  ctx.fillRect(cx + 1, cy - 14, 2, 2)
+  // 高光
+  ctx.fillStyle = PALETTE.powerup.hi
+  ctx.fillRect(cx - 4, cy - 2, 3, 3)
+}
+
+/** shovel：一把铁锹。竖直手柄 + 底部铲斗。 */
+function drawShovelIcon(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  const cx = x + TILE_SIZE / 2
+  const cy = y + TILE_SIZE / 2
+  // 手柄
+  ctx.fillStyle = '#c65fbf'
+  ctx.fillRect(cx - 2, cy - 12, 4, 14)
+  // 铲斗
+  ctx.fillStyle = PALETTE.powerup.shovel
+  ctx.fillRect(cx - 8, cy + 2, 16, 4)
+  ctx.fillRect(cx - 6, cy + 6, 12, 4)
+  ctx.fillRect(cx - 4, cy + 10, 8, 2)
+  // 顶端 T 型握把
+  ctx.fillStyle = '#c65fbf'
+  ctx.fillRect(cx - 6, cy - 12, 12, 3)
+}
+
+/** clock：一个圆钟盘 + 时针分针。 */
+function drawClockIcon(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  const cx = x + TILE_SIZE / 2
+  const cy = y + TILE_SIZE / 2
+  ctx.fillStyle = PALETTE.powerup.clock
+  ctx.fillRect(cx - 8, cy - 6, 16, 12)
+  ctx.fillRect(cx - 6, cy - 8, 12, 16)
+  ctx.fillStyle = '#000000'
+  ctx.fillRect(cx - 6, cy - 4, 12, 8)
+  ctx.fillRect(cx - 4, cy - 6, 8, 12)
+  // 指针：一横（3 点）一竖（12 点）
+  ctx.fillStyle = PALETTE.powerup.clock
+  ctx.fillRect(cx - 1, cy - 3, 2, 4)
+  ctx.fillRect(cx, cy - 1, 4, 2)
+  // 顶部把手
+  ctx.fillStyle = '#a0a0a0'
+  ctx.fillRect(cx - 2, cy - 10, 4, 2)
+}
+
+/** tank：一个迷你坦克剪影。 */
+function drawTankIcon(ctx: CanvasRenderingContext2D, x: number, y: number): void {
+  const cx = x + TILE_SIZE / 2
+  const cy = y + TILE_SIZE / 2
+  ctx.fillStyle = PALETTE.powerup.tank
+  // 履带
+  ctx.fillRect(cx - 8, cy - 2, 3, 10)
+  ctx.fillRect(cx + 5, cy - 2, 3, 10)
+  // 车体
+  ctx.fillRect(cx - 5, cy - 4, 10, 10)
+  // 炮塔
+  ctx.fillRect(cx - 2, cy - 8, 4, 4)
+  ctx.fillRect(cx - 1, cy - 12, 2, 5)
+  // 高光
+  ctx.fillStyle = PALETTE.powerup.hi
+  ctx.fillRect(cx - 3, cy - 2, 2, 2)
 }

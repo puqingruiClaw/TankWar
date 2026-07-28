@@ -4,6 +4,9 @@ import GameCanvas, { type GameOverReason, type KillByKind } from '@/components/G
 import {
   PLAYER_INITIAL_LIVES,
   PLAYER_MAX_BULLETS,
+  POWERUP_CLOCK_DURATION,
+  POWERUP_HELMET_DURATION,
+  POWERUP_SHOVEL_DURATION,
   SCORE_TABLE,
   STAGE_CLEAR_DURATION,
   STAGE_CLEAR_TICK,
@@ -12,7 +15,7 @@ import {
 } from '@/game/constants'
 import { DEFAULT_LEVEL, LEVELS, STAGE_HINTS, TOTAL_STAGES } from '@/game/maps/levels'
 import type { EngineStats } from '@/game/GameEngine'
-import type { InputIntent, LevelDefinition, Tank } from '@/game/types'
+import type { InputIntent, LevelDefinition, PowerUpKind, Tank } from '@/game/types'
 
 /**
  * PlayPage —— T-12 起把"单纯战场画布"升级成完整的一局；T-15 起打通
@@ -54,6 +57,19 @@ const DIR_LABEL: Record<'up' | 'down' | 'left' | 'right', string> = {
   right: '→',
 }
 
+/**
+ * T-17：道具 HUD 面板里 6 种 kind 的短标签。
+ * 使用大写 3-6 字母，与 SCORE / STAGE 面板的 pixel 字号一致。
+ */
+const POWERUP_KIND_LABEL: Record<PowerUpKind, string> = {
+  star: 'STAR',
+  helmet: 'HELMET',
+  bomb: 'BOMB',
+  shovel: 'SHOVEL',
+  clock: 'CLOCK',
+  tank: 'TANK',
+}
+
 interface StageClearInfo {
   killByKind: KillByKind
   score: number
@@ -87,6 +103,28 @@ export default function PlayPage() {
   })
   const [lives, setLives] = useState(PLAYER_INITIAL_LIVES)
   const [score, setScore] = useState(0)
+  /**
+   * T-17：HUD 面板用的一份"道具状态快照"。
+   * - field：场上唯一道具（null 表示无）；
+   * - freezeTimer / shovelTimer / helmetTimer：3 类"计时型 buff"的剩余秒；
+   * - playerLevel：玩家火力等级（星道具累加）；
+   * - collected：本局累计拾取道具数（HUD 展示 & 未来接结算面板）。
+   */
+  const [powerUp, setPowerUp] = useState<{
+    field: { kind: PowerUpKind; lifetime: number } | null
+    freezeTimer: number
+    shovelTimer: number
+    helmetTimer: number
+    playerLevel: number
+    collected: number
+  }>({
+    field: null,
+    freezeTimer: 0,
+    shovelTimer: 0,
+    helmetTimer: 0,
+    playerLevel: 0,
+    collected: 0,
+  })
   const [stageClearInfo, setStageClearInfo] = useState<StageClearInfo | null>(null)
   const [gameOverInfo, setGameOverInfo] = useState<GameOverInfo | null>(null)
   /**
@@ -124,6 +162,17 @@ export default function PlayPage() {
   )
   const handleScore = useCallback((s: number) => setScore(s), [])
   const handleLives = useCallback((l: number) => setLives(l), [])
+  const handlePowerUp = useCallback(
+    (info: {
+      field: { kind: PowerUpKind; lifetime: number } | null
+      freezeTimer: number
+      shovelTimer: number
+      helmetTimer: number
+      playerLevel: number
+      collected: number
+    }) => setPowerUp(info),
+    [],
+  )
   const handleStageCleared = useCallback((info: StageClearInfo) => {
     setStageClearInfo(info)
     setPhase('stage-clear')
@@ -208,6 +257,7 @@ export default function PlayPage() {
             onBaseHit={handleBaseHit}
             onScoreChange={handleScore}
             onLivesChange={handleLives}
+            onPowerUpChange={handlePowerUp}
             onStageCleared={handleStageCleared}
             onGameOver={handleGameOver}
           />
@@ -264,6 +314,28 @@ export default function PlayPage() {
             <p className="font-pixel text-pixel-2xl text-hud-accent">
               {score.toString().padStart(6, '0')}
             </p>
+          </div>
+
+          <div className="mt-4 border-t border-outline pt-2">
+            <p className="font-pixel text-pixel-sm text-outline">POWER-UP</p>
+            <p className="font-pixel text-pixel-sm text-white">
+              FIELD{' '}
+              <span className={powerUp.field ? 'animate-blink text-hud-accent' : 'text-outline'}>
+                {powerUp.field
+                  ? `${POWERUP_KIND_LABEL[powerUp.field.kind]} ${powerUp.field.lifetime.toFixed(1)}s`
+                  : '---'}
+              </span>
+            </p>
+            <p className="mt-1 font-pixel text-pixel-sm text-white">
+              STAR LV <span className="text-hud-accent">{powerUp.playerLevel}</span>
+              <span className="ml-2 text-outline">GOT</span>{' '}
+              <span className="text-hud-accent">
+                {powerUp.collected.toString().padStart(2, '0')}
+              </span>
+            </p>
+            <BuffBar label="HELMET" seconds={powerUp.helmetTimer} full={POWERUP_HELMET_DURATION} />
+            <BuffBar label="CLOCK" seconds={powerUp.freezeTimer} full={POWERUP_CLOCK_DURATION} />
+            <BuffBar label="SHOVEL" seconds={powerUp.shovelTimer} full={POWERUP_SHOVEL_DURATION} />
           </div>
 
           <div className="mt-4">
@@ -528,6 +600,37 @@ function GameCompleteOverlay({
           MENU
         </a>
       </div>
+    </div>
+  )
+}
+
+/**
+ * BuffBar —— T-17 计时型 buff 剩余时间的水平进度条。
+ *
+ * 3 类 buff（HELMET / CLOCK / SHOVEL）共用同一份 UI：
+ * - 左侧固定宽度的名称标签；
+ * - 右侧一根像素条，宽度 = seconds / full；
+ * - seconds === 0 时进度条完全空、名称标签变暗 —— 让"未激活"与"进行中"一眼可辨。
+ */
+function BuffBar({ label, seconds, full }: { label: string; seconds: number; full: number }) {
+  const on = seconds > 0
+  const pct = full > 0 ? Math.max(0, Math.min(100, (seconds / full) * 100)) : 0
+  return (
+    <div className="mt-1 flex items-center gap-2">
+      <span className={`w-14 font-pixel text-pixel-sm ${on ? 'text-hud-accent' : 'text-outline'}`}>
+        {label}
+      </span>
+      <div className="relative h-1 flex-1 bg-outline" aria-hidden>
+        <div
+          className="h-full bg-hud-accent transition-[width] duration-100"
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <span
+        className={`w-8 text-right font-pixel text-pixel-sm ${on ? 'text-hud-accent' : 'text-outline'}`}
+      >
+        {on ? `${seconds.toFixed(1)}s` : '--'}
+      </span>
     </div>
   )
 }
