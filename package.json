@@ -8,12 +8,14 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "preview": "vite preview",
+    "preview:host": "vite preview --host --port 4173",
     "check": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,md}\" \"*.{ts,tsx,js,json,md}\"",
-    "format:check": "prettier --check \"src/**/*.{ts,tsx,css,md}\" \"*.{ts,tsx,js,json,md}\""
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css,md}\" \"*.{ts,tsx,js,json,md}\"",
+    "verify": "pnpm run format:check && pnpm run lint && pnpm run check && pnpm run test && pnpm run build"
   },
   "dependencies": {
     "clsx": "^2.1.1",
