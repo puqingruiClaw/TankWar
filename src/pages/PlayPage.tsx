@@ -1,19 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import StageLayout from '@/layouts/StageLayout'
 import GameCanvas, { type GameOverReason, type KillByKind } from '@/components/GameCanvas'
+import GameHUD from '@/components/GameHUD'
 import {
   PLAYER_INITIAL_LIVES,
-  PLAYER_MAX_BULLETS,
-  POWERUP_CLOCK_DURATION,
-  POWERUP_HELMET_DURATION,
-  POWERUP_SHOVEL_DURATION,
   SCORE_TABLE,
   STAGE_CLEAR_DURATION,
   STAGE_CLEAR_TICK,
-  TANK_COOLDOWN,
-  TILE_SIZE,
 } from '@/game/constants'
-import { DEFAULT_LEVEL, LEVELS, STAGE_HINTS, TOTAL_STAGES } from '@/game/maps/levels'
+import { DEFAULT_LEVEL, LEVELS, TOTAL_STAGES } from '@/game/maps/levels'
 import type { EngineStats } from '@/game/GameEngine'
 import type { InputIntent, LevelDefinition, PowerUpKind, Tank } from '@/game/types'
 
@@ -48,26 +43,6 @@ const INITIAL_TANK: Pick<Tank, 'x' | 'y' | 'dir' | 'level' | 'hp' | 'invulnerabl
   hp: 1,
   invulnerable: 0,
   cooldown: 0,
-}
-
-const DIR_LABEL: Record<'up' | 'down' | 'left' | 'right', string> = {
-  up: '↑',
-  down: '↓',
-  left: '←',
-  right: '→',
-}
-
-/**
- * T-17：道具 HUD 面板里 6 种 kind 的短标签。
- * 使用大写 3-6 字母，与 SCORE / STAGE 面板的 pixel 字号一致。
- */
-const POWERUP_KIND_LABEL: Record<PowerUpKind, string> = {
-  star: 'STAR',
-  helmet: 'HELMET',
-  bomb: 'BOMB',
-  shovel: 'SHOVEL',
-  clock: 'CLOCK',
-  tank: 'TANK',
 }
 
 interface StageClearInfo {
@@ -233,13 +208,6 @@ export default function PlayPage() {
     return `${enemiesLeft} ENEMIES LEFT`
   }, [phase, baseDown, paused, enemiesLeft])
 
-  const totalEnemies = level.enemyQueue.length
-  const spawnedCount = Math.min(totalEnemies, enemies.totalSpawned)
-  const tankCol = Math.floor(tank.x / TILE_SIZE)
-  const tankRow = Math.floor(tank.y / TILE_SIZE)
-  const shieldOn = tank.invulnerable > 0
-  const cooldownPct = Math.min(100, Math.round((tank.cooldown / TANK_COOLDOWN.PLAYER) * 100))
-
   return (
     <StageLayout title={level.name} subtitle={subtitle} showBack>
       <div className="flex h-full w-full items-center gap-4">
@@ -276,175 +244,20 @@ export default function PlayPage() {
           )}
         </div>
 
-        <aside className="flex h-canvas w-hud flex-col justify-between p-3 pixel-frame">
-          <div>
-            <p className="font-pixel text-pixel-sm text-outline">ENEMIES</p>
-            <div className="mt-2 grid grid-cols-4 gap-1">
-              {Array.from({ length: totalEnemies }).map((_, i) => {
-                const consumed = i < spawnedCount
-                return (
-                  <div
-                    key={i}
-                    className={`h-3 w-3 ${consumed ? 'bg-outline opacity-40' : 'bg-tank-enemyBasic'}`}
-                    aria-hidden
-                  />
-                )
-              })}
-            </div>
-            <p className="mt-2 font-pixel text-pixel-sm text-white">
-              FIELD <span className="text-tank-enemyBasic">{enemies.field}</span>
-              <span className="ml-2">
-                QUEUE <span className="text-hud-accent">{enemies.queue}</span>
-              </span>
-            </p>
-          </div>
-
-          <div className="mt-4">
-            <p className="font-pixel text-pixel-sm text-outline">1P</p>
-            <p className="font-pixel text-pixel-lg text-hud-accent">
-              {'♥'.repeat(Math.max(lives, 0)) || '·'}
-            </p>
-            <p className="font-pixel text-pixel-sm text-white">
-              LIVES <span className="text-hud-accent">{lives}</span>
-            </p>
-          </div>
-
-          <div className="mt-4">
-            <p className="font-pixel text-pixel-sm text-outline">SCORE</p>
-            <p className="font-pixel text-pixel-2xl text-hud-accent">
-              {score.toString().padStart(6, '0')}
-            </p>
-          </div>
-
-          <div className="mt-4 border-t border-outline pt-2">
-            <p className="font-pixel text-pixel-sm text-outline">POWER-UP</p>
-            <p className="font-pixel text-pixel-sm text-white">
-              FIELD{' '}
-              <span className={powerUp.field ? 'animate-blink text-hud-accent' : 'text-outline'}>
-                {powerUp.field
-                  ? `${POWERUP_KIND_LABEL[powerUp.field.kind]} ${powerUp.field.lifetime.toFixed(1)}s`
-                  : '---'}
-              </span>
-            </p>
-            <p className="mt-1 font-pixel text-pixel-sm text-white">
-              STAR LV <span className="text-hud-accent">{powerUp.playerLevel}</span>
-              <span className="ml-2 text-outline">GOT</span>{' '}
-              <span className="text-hud-accent">
-                {powerUp.collected.toString().padStart(2, '0')}
-              </span>
-            </p>
-            <BuffBar label="HELMET" seconds={powerUp.helmetTimer} full={POWERUP_HELMET_DURATION} />
-            <BuffBar label="CLOCK" seconds={powerUp.freezeTimer} full={POWERUP_CLOCK_DURATION} />
-            <BuffBar label="SHOVEL" seconds={powerUp.shovelTimer} full={POWERUP_SHOVEL_DURATION} />
-          </div>
-
-          <div className="mt-4">
-            <p className="font-pixel text-pixel-sm text-outline">STAGE</p>
-            <p className="font-pixel text-pixel-2xl text-white">
-              {level.id.toString().padStart(2, '0')}
-              <span className="ml-2 text-pixel-sm text-outline">
-                / {TOTAL_STAGES.toString().padStart(2, '0')}
-              </span>
-            </p>
-            {level.tag && (
-              <p className="mt-1 font-pixel text-pixel-sm text-hud-accent">{level.tag}</p>
-            )}
-            {STAGE_HINTS[level.id] && (
-              <p className="mt-1 font-pixel text-pixel-sm text-white leading-snug">
-                <span className="text-outline">HINT </span>
-                {STAGE_HINTS[level.id]}
-              </p>
-            )}
-          </div>
-
-          <div className="mt-4 border-t border-outline pt-2">
-            <p className="font-pixel text-pixel-sm text-outline">TANK</p>
-            <p className="font-pixel text-pixel-sm text-white">
-              POS{' '}
-              <span className="text-hud-accent">
-                {tankCol.toString().padStart(2, '0')},{tankRow.toString().padStart(2, '0')}
-              </span>
-            </p>
-            <p className="font-pixel text-pixel-sm text-white">
-              FACE <span className="text-hud-accent">{DIR_LABEL[tank.dir]}</span>
-            </p>
-            <p className="font-pixel text-pixel-sm text-white">
-              LV <span className="text-hud-accent">{tank.level}</span>
-            </p>
-            <p className="font-pixel text-pixel-sm text-white">
-              SHIELD{' '}
-              <span className={shieldOn ? 'animate-blink text-hud-accent' : 'text-outline'}>
-                {shieldOn ? `${tank.invulnerable.toFixed(1)}s` : 'OFF'}
-              </span>
-            </p>
-          </div>
-
-          <div className="mt-4 border-t border-outline pt-2">
-            <p className="font-pixel text-pixel-sm text-outline">BULLETS</p>
-            <p className="font-pixel text-pixel-sm text-white">
-              LIVE{' '}
-              <span className="text-hud-accent">
-                {bulletsAlive}/{PLAYER_MAX_BULLETS}
-              </span>
-            </p>
-            <div className="mt-1 h-1 w-full bg-outline" aria-hidden>
-              <div
-                className="h-full bg-hud-accent transition-[width] duration-75"
-                style={{ width: `${100 - cooldownPct}%` }}
-              />
-            </div>
-            <p className="mt-1 font-pixel text-pixel-sm text-white">
-              CD <span className="text-hud-accent">{tank.cooldown.toFixed(2)}s</span>
-            </p>
-          </div>
-
-          <div className="mt-4 border-t border-outline pt-2">
-            <p className="font-pixel text-pixel-sm text-outline">BASE</p>
-            <p className="font-pixel text-pixel-sm text-white">
-              STATUS{' '}
-              <span className={baseDown ? 'animate-blink text-hud-accent' : 'text-white'}>
-                {baseDown ? 'DESTROYED' : 'OK'}
-              </span>
-            </p>
-          </div>
-
-          <div className="mt-4 border-t border-outline pt-2">
-            <p className="font-pixel text-pixel-sm text-outline">ENGINE</p>
-            <p className="font-pixel text-pixel-sm text-white">
-              FPS <span className="text-hud-accent">{stats.fps.toString().padStart(2, '0')}</span>
-            </p>
-            <p className="font-pixel text-pixel-sm text-white">
-              UPS <span className="text-hud-accent">{stats.ups.toString().padStart(2, '0')}</span>
-            </p>
-            <p className="font-pixel text-pixel-sm text-white">
-              DT <span className="text-hud-accent">{stats.frameMs.toFixed(1)}ms</span>
-            </p>
-            <p className="font-pixel text-pixel-sm text-white">
-              T <span className="text-hud-accent">{stats.time.toFixed(0)}s</span>
-            </p>
-          </div>
-
-          <div className="mt-2 border-t border-outline pt-2">
-            <p className="font-pixel text-pixel-sm text-outline">INPUT</p>
-            <p className="font-pixel text-pixel-sm text-white">
-              DIR{' '}
-              <span className="text-hud-accent">{intent.dir ? DIR_LABEL[intent.dir] : '·'}</span>
-            </p>
-            <p className="font-pixel text-pixel-sm text-white">
-              FIRE <span className="text-hud-accent">{intent.fire ? 'ON' : '··'}</span>
-            </p>
-            <p className="font-pixel text-pixel-sm text-white">
-              STATE{' '}
-              <span className={paused ? 'text-hud-accent' : 'text-white'}>
-                {paused ? 'PAUSE' : phase.toUpperCase()}
-              </span>
-            </p>
-          </div>
-
-          <p className="mt-2 animate-blink font-pixel text-pixel-sm text-hud-accent">
-            {paused ? 'ESC=RESUME' : 'ESC=PAUSE'}
-          </p>
-        </aside>
+        <GameHUD
+          level={level}
+          enemies={enemies}
+          lives={lives}
+          score={score}
+          powerUp={powerUp}
+          tank={tank}
+          bulletsAlive={bulletsAlive}
+          baseDown={baseDown}
+          stats={stats}
+          intent={intent}
+          paused={paused}
+          phase={phase}
+        />
       </div>
     </StageLayout>
   )
@@ -600,37 +413,6 @@ function GameCompleteOverlay({
           MENU
         </a>
       </div>
-    </div>
-  )
-}
-
-/**
- * BuffBar —— T-17 计时型 buff 剩余时间的水平进度条。
- *
- * 3 类 buff（HELMET / CLOCK / SHOVEL）共用同一份 UI：
- * - 左侧固定宽度的名称标签；
- * - 右侧一根像素条，宽度 = seconds / full；
- * - seconds === 0 时进度条完全空、名称标签变暗 —— 让"未激活"与"进行中"一眼可辨。
- */
-function BuffBar({ label, seconds, full }: { label: string; seconds: number; full: number }) {
-  const on = seconds > 0
-  const pct = full > 0 ? Math.max(0, Math.min(100, (seconds / full) * 100)) : 0
-  return (
-    <div className="mt-1 flex items-center gap-2">
-      <span className={`w-14 font-pixel text-pixel-sm ${on ? 'text-hud-accent' : 'text-outline'}`}>
-        {label}
-      </span>
-      <div className="relative h-1 flex-1 bg-outline" aria-hidden>
-        <div
-          className="h-full bg-hud-accent transition-[width] duration-100"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span
-        className={`w-8 text-right font-pixel text-pixel-sm ${on ? 'text-hud-accent' : 'text-outline'}`}
-      >
-        {on ? `${seconds.toFixed(1)}s` : '--'}
-      </span>
     </div>
   )
 }
