@@ -28,7 +28,7 @@ import { useBgm } from '@/hooks/useAudio'
 
 /**
  * PlayPage —— T-12 起把"单纯战场画布"升级成完整的一局；T-15 起打通
- * 5 关完整流程 + 一周目通关：
+ * 全关卡完整流程 + 一周目通关（v1.0=5 关 / v1.1=10 关，关数由 [LEVELS](file:///Users/puqingrui/workspace/Projects/TankWar/src/game/maps/levels.ts) 长度决定）：
  *   playing → stage-clear（结算 + 自动切下一关）↺
  *   playing → stage-clear（末关）→ game-complete（一周目通关庆祝）
  *   playing → game-over（基地毁 or 3 命耗尽，允许 RETRY / 回菜单）
@@ -111,7 +111,7 @@ export default function PlayPage() {
   const [stageClearInfo, setStageClearInfo] = useState<StageClearInfo | null>(null)
   const [gameOverInfo, setGameOverInfo] = useState<GameOverInfo | null>(null)
   /**
-   * game-complete 面板需要的一份"整局快照"：一周目 5 关全通时 stage-clear
+   * game-complete 面板需要的一份"整局快照"：一周目所有关卡全通时 stage-clear
    * 结算面板停在最后一关的数据上，通关面板则展示"最终总分 + 最终关卡编号"，
    * 二者在同一 phase 上会打架，因此各持一份 state。
    */

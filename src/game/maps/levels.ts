@@ -13,16 +13,32 @@ import { STAGE_02 } from './stage-02'
 import { STAGE_03 } from './stage-03'
 import { STAGE_04 } from './stage-04'
 import { STAGE_05 } from './stage-05'
+import { STAGE_06 } from './stage-06'
+import { STAGE_07 } from './stage-07'
+import { STAGE_08 } from './stage-08'
+import { STAGE_09 } from './stage-09'
+import { STAGE_10 } from './stage-10'
 
 /**
- * 关卡注册表：T-15 起补齐全部 5 张；T-16 起做完系统调优 + 静态校验。
+ * 关卡注册表：T-15 起补齐首批 5 张；v1.1 (T-28) 追加 06~10 达到 10 关。
  * 顺序即"关卡推进顺序"：PlayPage 用 levelIndex 逐 +1 前进，走完最后一关
  * 触发 GAME COMPLETE。若后续要做二周目 / 无限模式，只需在此追加或引入
  * "关卡循环策略"。
  *
  * 单向依赖：pages / systems 通过 {@link getLevelById} 或 {@link LEVELS} 读取。
  */
-export const LEVELS: readonly LevelDefinition[] = [STAGE_01, STAGE_02, STAGE_03, STAGE_04, STAGE_05]
+export const LEVELS: readonly LevelDefinition[] = [
+  STAGE_01,
+  STAGE_02,
+  STAGE_03,
+  STAGE_04,
+  STAGE_05,
+  STAGE_06,
+  STAGE_07,
+  STAGE_08,
+  STAGE_09,
+  STAGE_10,
+]
 
 export function getLevelById(id: number): LevelDefinition | undefined {
   return LEVELS.find((l) => l.id === id)
