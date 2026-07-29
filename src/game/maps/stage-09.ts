@@ -75,7 +75,7 @@ export const STAGE_09: LevelDefinition = {
   id: 9,
   name: 'STAGE 09',
   tag: 'CROSSFIRE',
-  hint: 'CROSS SPLITS THE MAP! SWITCH QUADRANTS FAST',
+  hint: 'CROSS SPLITS MAP! SWITCH QUADRANTS FAST',
   map: MAP,
   enemyQueue: ENEMY_QUEUE,
 }

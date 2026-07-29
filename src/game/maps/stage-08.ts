@@ -73,7 +73,7 @@ export const STAGE_08: LevelDefinition = {
   id: 8,
   name: 'STAGE 08',
   tag: 'TWIN FEINT',
-  hint: 'FAKE BASES ON FLANKS! REAL BASE IS CENTER',
+  hint: 'FAKE BASES ON FLANKS! CENTER IS REAL',
   map: MAP,
   enemyQueue: ENEMY_QUEUE,
 }

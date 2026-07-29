@@ -75,7 +75,7 @@ export const STAGE_05: LevelDefinition = {
   id: 5,
   name: 'STAGE 05',
   tag: 'IRON FORTRESS',
-  hint: 'FINAL STAGE. KILL POWERS FIRST OR LOSE BASE',
+  hint: 'FINAL. KILL POWERS FIRST OR LOSE BASE',
   map: MAP,
   enemyQueue: ENEMY_QUEUE,
 }
