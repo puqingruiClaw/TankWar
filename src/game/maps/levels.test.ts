@@ -133,12 +133,13 @@ describe('validateLevel · 反面测试（防"条件反了"的静默 bug）', ()
     expect(() => validateLevel(bad)).toThrow(/length/)
   })
 
-  it('出现非法 tile code 时必抛', () => {
+  it('出现非法 tile code 时必抛（tile 循环先扫到 (0,0) 立即抛）', () => {
     const bad = makeMutated(base, (m) => {
       m[0][0] = 42 as unknown as TileCode
     })
-    // spawn 校验早于 tile 校验中的部分路径都会触发 —— 只要抛就算过
-    expect(() => validateLevel(bad)).toThrow()
+    // 锁死"是被 tile 分支抓住"，防止未来 tile 循环被删后
+    // 用 `.toThrow()` 无参数导致该测试仍然误绿。
+    expect(() => validateLevel(bad)).toThrow(/invalid tile code/)
   })
 
   it('基地不在 (BASE_POSITION) 时必抛', () => {
