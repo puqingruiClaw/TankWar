@@ -41,6 +41,16 @@ pnpm install
 pnpm dev             # → http://localhost:5173
 ```
 
+### 一键启动脚本（无需记命令）
+
+| 平台           | 命令                     | 说明                                                                          |
+| -------------- | ------------------------ | ----------------------------------------------------------------------------- |
+| macOS / Linux  | `./scripts/start.sh`     | 校验 Node/pnpm → 按需 install → 启 `pnpm dev`                                 |
+| macOS / Linux  | `./scripts/preview.sh`   | 同上但走 `build` + `preview:host`，用于真机 / 局域网验收                      |
+| Windows (Pwsh) | `pwsh scripts/start.ps1` | Node/pnpm 检测 + install + `pnpm dev`；PowerShell 5.1 也可 `powershell -File` |
+
+脚本会打印每一步在做什么；缺 pnpm 时会先尝试 `corepack enable` 自动拉起，避免手动装。
+
 ### 常用脚本
 
 | 命令                                | 说明                                                              |
